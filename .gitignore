@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.env
+*.tmp
+*cache*
+
+# Local-only automation script with an embedded credential. Keep it out of the public repo.
+# Move the key to an environment variable and rotate it before removing this line.
+carrier_engineer_daemon.py
