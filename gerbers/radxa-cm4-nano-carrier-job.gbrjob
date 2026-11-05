@@ -5,13 +5,13 @@
       "Application": "Pcbnew",
       "Version": "8.0.9-8.0.9-0~ubuntu24.04.1"
     },
-    "CreationDate": "2026-11-05T20:48:31+00:00"
+    "CreationDate": "2026-11-05T20:58:15+00:00"
   },
   "GeneralSpecs": {
     "ProjectId": {
       "Name": "radxa-cm4-nano-carrier",
       "GUID": "72616478-612d-4636-9d34-2d6e616e6f2d",
-      "Revision": "1.0"
+      "Revision": "rev?"
     },
     "Size": {
       "X": 55.15,
@@ -57,26 +57,6 @@
       "FilePolarity": "Positive"
     },
     {
-      "Path": "radxa-cm4-nano-carrier-F_Adhesive.gta",
-      "FileFunction": "Glue,Top",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "radxa-cm4-nano-carrier-B_Adhesive.gba",
-      "FileFunction": "Glue,Bot",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "radxa-cm4-nano-carrier-F_Paste.gtp",
-      "FileFunction": "SolderPaste,Top",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "radxa-cm4-nano-carrier-B_Paste.gbp",
-      "FileFunction": "SolderPaste,Bot",
-      "FilePolarity": "Positive"
-    },
-    {
       "Path": "radxa-cm4-nano-carrier-F_Silkscreen.gto",
       "FileFunction": "Legend,Top",
       "FilePolarity": "Positive"
@@ -97,26 +77,6 @@
       "FilePolarity": "Negative"
     },
     {
-      "Path": "radxa-cm4-nano-carrier-User_Drawings.gbr",
-      "FileFunction": "Other,User",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "radxa-cm4-nano-carrier-User_Comments.gbr",
-      "FileFunction": "Other,User",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "radxa-cm4-nano-carrier-User_Eco1.gbr",
-      "FileFunction": "Other,User",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "radxa-cm4-nano-carrier-User_Eco2.gbr",
-      "FileFunction": "Other,User",
-      "FilePolarity": "Positive"
-    },
-    {
       "Path": "radxa-cm4-nano-carrier-Edge_Cuts.gm1",
       "FileFunction": "Profile",
       "FilePolarity": "Positive"
@@ -126,10 +86,6 @@
     {
       "Type": "Legend",
       "Name": "Top Silk Screen"
-    },
-    {
-      "Type": "SolderPaste",
-      "Name": "Top Solder Paste"
     },
     {
       "Type": "SolderMask",
@@ -181,10 +137,6 @@
       "Type": "SolderMask",
       "Thickness": 0.01,
       "Name": "Bottom Solder Mask"
-    },
-    {
-      "Type": "SolderPaste",
-      "Name": "Bottom Solder Paste"
     },
     {
       "Type": "Legend",

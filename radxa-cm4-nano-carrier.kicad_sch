@@ -1,13 +1,8 @@
 (kicad_sch
   (version 20231120)
-  (generator "master_engineer_daemon")
+  (generator "master_parallel_orchestrator")
   (generator_version "8.0")
   (uuid "radxa-cm4-nano-carrier-sch-001")
   (paper "A4")
-  (title_block
-    (title "Radxa Cm4 Nano Carrier")
-    (company "Sreesai Arjun Engineering")
-    (comment 1 "Radxa CM4 Nano Ultra-Compact Carrier Board")
-    (comment 2 "0.0mm Overhang Form Factor 55x40mm")
-  )
+  (title_block (title "Radxa Cm4 Nano Carrier") (company "Sreesai Arjun Engineering"))
 )
