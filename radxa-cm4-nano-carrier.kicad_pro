@@ -1,0 +1,21 @@
+{
+  "board": {
+    "design_settings": {
+      "rules": {
+        "min_clearance": 0.1,
+        "min_track_width": 0.1,
+        "min_via_annular_width": 0.12,
+        "min_via_diameter": 0.45
+      }
+    }
+  },
+  "meta": {
+    "version": 2
+  },
+  "sheets": [
+    [
+      "",
+      ""
+    ]
+  ]
+}
