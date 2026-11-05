@@ -1,70 +1,82 @@
-# Radxa CM4 Nano Carrier (Cycle 1): DRC and Manufacturability Review
+# DRC and Manufacturability Review: Radxa CM4-Form-Factor Nano Carrier, Rev 1.0 (Cycle 1)
 
-## Scope
-
-I received only a text description of the design, with no Gerbers, ODB++, KiCad/Altium project, stackup, or length report. I cannot measure clearances, via placement, or trace lengths. Each status below is therefore one of three kinds:
-
-* **Spec-level**: The rule or design intent can be judged from the description alone.
-* **Conditional**: The status depends on layout data I haven't seen.
-* **Unverified**: Layout data is required.
-
-Several rules have problems in the rule definitions themselves, and those are worth fixing before layout.
+**Scope limitation:** The submitted document is cut off in Section 0, finding R1. I received no layout, Gerbers, stackup, or length report. Rules that need layout data are marked **UNVERIFIED** and cannot be signed off as PASS. Rules that can be decided from the stated geometry or datasheet facts are given a definite status.
 
 ---
 
-## Rule 1: M2.5 Standoff and Screw Head Clearance (2.25 mm margin)
+## Summary
 
-**Status: FAIL (spec-level)**
-
-**Findings**
-
-* A 2.25 mm radius keep-out (Ø4.5 mm) equals the head diameter of a DIN 912 / ISO 4762 M2.5 socket cap screw. That leaves zero tolerance for screw-head runout or hole position tolerance.
-* Other common hardware exceeds 2.25 mm outright:
-
-| Hardware | Typical diameter | Radius | vs. 2.25 mm |
+| # | Rule | Status | Severity |
 |---|---|---|---|
-| M2.5 socket cap (DIN 912) | 4.5 mm | 2.25 mm | 0 mm margin |
-| M2.5 pan head (ISO 7045) | ~5.0 mm | 2.5 mm | **Violates** |
-| M2.5 hex standoff, 5 mm A/F (across corners) | ~5.77 mm | 2.89 mm | **Violates** |
-| M2.5 nylon/steel washer | 5.0–6.0 mm | 2.5–3.0 mm | **Violates** |
+| 1 | M2.5 standoff and screw-head clearance at 2.25 mm edge margin | **FAIL** | Blocker |
+| 2 | Copper pour ≥0.3 mm from Edge.Cuts | **FAIL** (at the mounting holes); **UNVERIFIED** elsewhere | Blocker |
+| 3 | Thermal via stitching on SY8089 (SOT23-5) | **FAIL**: the rule is mis-specified, and there is a thermal risk | Major |
+| 4 | PCIe and HDMI intra-pair skew <0.15 mm | **UNVERIFIED**: the target is acceptable, but no length data was provided | Major |
 
-* **Stack height**: A 55×40 mm carrier matches the CM4 module footprint, with mounting holes about 3.5 mm in from each edge. Standoff height must match the DF40 mated height for your connector variant, typically 1.5 mm or about 3.0 mm depending on DF40 part selection. Otherwise screw torque will load the 0.4 mm pitch connectors.
-
-**Corrective action**
-
-1. Increase the keep-out to **≥3.0 mm radius (Ø6.0 mm)** on both layers. This covers hex standoffs, washers, and fixture tolerance.
-2. Apply the keep-out to copper, components, and traces on top and bottom layers. Use a plain annular ring or NPTH, and stitch the annular ring to GND only if chassis-ground mounting is intended.
-3. Confirm hole drill size: **2.7 mm** for M2.5 clearance (ISO 273 medium fit).
-4. Verify standoff length equals the DF40 mated stack height. Document the exact DF40 part numbers (receptacle and header) on the fab/assembly drawing.
-5. Check that no DF40 body, decoupling cap, or SY8089 component sits inside the enlarged keep-outs, particularly at the corners near the connectors.
+**Gate: NOT release-for-fab.**
 
 ---
 
-## Rule 2: Copper Pour to Edge Cut (≥0.3 mm)
+## 1. M2.5 Standoff and Screw-Head Clearance — FAIL
 
-**Status: CONDITIONAL PASS (marginal)**
+**Geometry check, with the hole center 2.25 mm from two edges:**
 
-**Findings**
+| Feature | Radius | Margin to edge (2.25 − r) | Required | Result |
+|---|---|---|---|---|
+| Drill, Ø2.7 clearance | 1.35 | 0.90 mm | ≥1.0 mm (hole to board edge, typical JLC guideline) | FAIL |
+| Annular pad / keepout, Ø5.0 | 2.50 | **−0.25 mm** (overhangs the edge) | ≥0.3 mm | FAIL |
+| Socket head, ISO 4762 (dk 4.5) | 2.25 | 0.00 mm | ≥0.25 mm, so the head does not overhang or catch the enclosure | FAIL |
+| Button head, ISO 7380 (dk ≈4.7) | ≈2.35 | −0.10 mm | — | FAIL |
+| Pan head, ISO 7045 (dk 5.0) | 2.50 | −0.25 mm | — | FAIL |
+| Hex standoff, 5 mm across flats (≈5.77 mm across corners) | 2.89 | **−0.64 mm** | — | FAIL |
 
-* 0.3 mm is the common fab minimum for routed edges. It is not a robust design value.
-* At 0.3 mm, router tolerance (±0.1–0.2 mm) can expose copper at the board edge. This risks shorts to an enclosure and GND burrs.
-* V-score panelization typically requires **≥0.4–0.5 mm**, and some fabs specify more.
-* The board edge equals the module outline, so copper near the edge also sits under the module edge.
+**What the failure causes:**
+- The pad copper gets cut by the router, which exposes copper or burrs at the edge.
+- The standoff overhangs the board outline, so it collides with enclosure walls.
+- The thin 0.9 mm web cracks under screw torque.
+- No standard M2.5 fastener head fits inside the outline.
 
-**Corrective action**
-
-1. Raise the zone-to-Edge.Cuts clearance to **0.5 mm** (0.4 mm absolute minimum if routing space forces it).
-2. Apply the rule to **all copper layers, including inner planes**. Inner-plane pullback is often forgotten.
-3. Add a GND via fence along the perimeter, about 0.5 mm in from the pullback, at a pitch of λ/20 or less. This improves EMI containment with the HDMI and PCIe signals present.
-4. Confirm the panelization method (tab-route vs. V-score) with the fab and set the clearance accordingly.
+**Corrective action:**
+1. Move the hole centers to **3.5 mm from each edge**. This matches the CM4-form-factor module hole pattern, so module, carrier, and standoffs stack coaxially. It is also the most likely intent behind "CM4 form factor".
+   - Drill wall to edge becomes 2.15 mm.
+   - Ø5.0 pad edge becomes 1.0 mm from the edge.
+   - Hex standoff corner becomes about 0.6 mm from the edge.
+   - All of these pass.
+2. If the mechanical constraint truly forces 2.25 mm, then do all of the following:
+   - Use an NPTH hole with no pad.
+   - Pull the copper keepout to Ø4.0.
+   - Specify a low-profile M2.5 head no larger than Ø4.0, such as DIN 7984 or a wafer head.
+   - Use **round** standoffs no larger than Ø4.0.
+   - Accept the 0.9 mm web, with a waiver from the fab.
+3. Add a courtyard and keepout in the footprint so DRC flags this condition automatically.
 
 ---
 
-## Rule 3: Thermal Via Stitching on SY8089 (SOT23-5)
+## 2. Copper Pour Clearance to Edge Cut (≥0.3 mm)
 
-**Status: FAIL (rule definition) / UNVERIFIED (layout)**
+- **At the mounting holes: FAIL.** This follows directly from Rule 1, since the pad crosses the board edge.
+- **Elsewhere: UNVERIFIED.** No layout was supplied.
 
-**Findings**
+**Corrective action and required settings (KiCad):**
+- Board Setup → Constraints → *Copper to edge clearance*: **0.3 mm** minimum. I recommend **0.5 mm** if the board will be panelized with V-score, since V-cut needs about 0.4 mm or more.
+- Zone properties should not override the edge clearance. Re-pour all zones and run DRC with "Test for parity between PCB and schematic" enabled.
+- Check these specific areas, which most often violate the rule:
+  - Connector shells and through-hole tabs at the edge (USB, HDMI). Edge-mounted connectors may intentionally sit at the edge, but their *pour* must not.
+  - GND stitching vias along the outline. Keep each via annulus at least 0.3 mm from the edge.
+  - Inner-layer planes on a 4-layer build. Pull them back ≥0.5 mm to avoid exposed copper or delamination when routed.
+- Optional: add a GND guard ring with via fence at a 0.5 mm inset for EMI. This must not be applied at the mounting holes if they stay at 2.25 mm.
 
-* **The SY8089 in SOT23-5 has no exposed thermal pad.** "Thermal via stitching under the device" does not apply. Heat leaves mainly through the leads, chiefly GND and the LX/SW pin, into copper.
-* Vias placed **under the body or in pads** without tenting or filling cause solder wicking, voids, and tombstoning on a small leaded package. Your
+---
+
+## 3. SY8089 Thermal Vias — FAIL (rule mis-specified, plus thermal risk)
+
+**Problem with the rule:** The SY8089 in SOT23-5 has **no exposed pad**. "Thermal via stitching on the package" therefore has no pad to land on. The heat path runs through the leads, mainly GND (pin 2) and the SW and IN copper, into the surrounding copper area.
+
+**Thermal sanity check (provide your actual operating point):**
+- Assume a 5 V to 3.3 V conversion at 2 A with about 90% efficiency. Losses are then roughly 0.7 W.
+- SOT23-5 θJA is typically in the high-100s to above 200 °C/W on JEDEC boards. With a good copper spread it may drop to about 100–130 °C/W.
+- That gives a temperature rise of roughly 70–100 °C. At an ambient of 40 °C or more, the part will approach thermal shutdown.
+- **The full 2 A rating is not usable continuously in this package without derating.**
+
+**Corrective action:**
+1. Rewrite the rule as follows: *"GND pin 
