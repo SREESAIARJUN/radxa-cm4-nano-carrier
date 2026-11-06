@@ -1,0 +1,342 @@
+{
+  "checks": [
+    {
+      "name": "U7 max threshold < +5V_IN minimum 4.75 V (a valid supply is never held off)",
+      "ok": true,
+      "detail": "VTH,max 4.50 V, margin 250 mV"
+    },
+    {
+      "name": "U7 min threshold > MxL7704 UVLO-rising max 3.9 V (GLOBAL_EN asserted before the PMIC can start)",
+      "ok": true,
+      "detail": "VTH,min 4.25 V"
+    },
+    {
+      "name": "U7 /RESET abs max >= GLOBAL_EN released level (5.25 V, 100k to +5V on CM4)",
+      "ok": true,
+      "detail": "6.0 V >= 5.25 V"
+    },
+    {
+      "name": "GLOBAL_EN low level <= 0.8 V (MxL7704 VIL) with 100k module pull-up",
+      "ok": true,
+      "detail": "VOL <= 0.3 V at 52 uA sink"
+    },
+    {
+      "name": "GLOBAL_EN released level >= 2.0 V (MxL7704 VIH) with U7 leakage",
+      "ok": true,
+      "detail": "4.65 V"
+    },
+    {
+      "name": "Power-on GLOBAL_EN low pulse > 1 ms (CM4 restart minimum)",
+      "ok": true,
+      "detail": "140..360 ms after VIN > VTH"
+    },
+    {
+      "name": "PWR_OK rising threshold (max, incl. 3 % hysteresis) < +3V3_SYS minimum",
+      "ok": true,
+      "detail": "3.168 V < 3.234 V (margin 66 mV)"
+    },
+    {
+      "name": "PWR_OK falling threshold (min) >= lowest +3V3_SYS peripheral VDD 2.7 V",
+      "ok": true,
+      "detail": "VIT- 2.756 / 2.912 / 3.076 V"
+    },
+    {
+      "name": "SENSE input current error negligible (< 0.5 % of VIT)",
+      "ok": true,
+      "detail": "0.22 mV at Rth 8.61 k"
+    },
+    {
+      "name": "U8 VDD (+5V_IN) inside 1.7..6.5 V across the input window",
+      "ok": true,
+      "detail": "4.75..5.25 V"
+    },
+    {
+      "name": "PWR_OK valid while +3V3_SYS = 0 V (VDD from always-on +5V_IN, VPOR 0.8 V)",
+      "ok": true,
+      "detail": "RESET low from VDD 0.8 V; supervisor NOT powered from the rail it monitors"
+    },
+    {
+      "name": "PWR_OK high (R51 100k to +3V3_SYS, RADXA build) >= 2.0 V with 300 nA leakage",
+      "ok": true,
+      "detail": "3.20 V"
+    },
+    {
+      "name": "RUN_PG low (RPi build: 10k module pull-up, 220R series, U8 VOL) <= 0.8 V",
+      "ok": true,
+      "detail": "200 mV at 0.32 mA"
+    },
+    {
+      "name": "[RADXA (default: RK3566 / RK3576 / RK3588)] R51 (pull-up) and R55 (RUN link) never both fitted",
+      "ok": true,
+      "detail": "R51=fit, R55=DNP"
+    },
+    {
+      "name": "[RPI_CM4] R51 (pull-up) and R55 (RUN link) never both fitted",
+      "ok": true,
+      "detail": "R51=DNP, R55=fit"
+    },
+    {
+      "name": "[default build] RPi CM4 (BCM2711 + MxL7704): no static drive on pin 99 / pin 92 unless the module allows it",
+      "ok": true,
+      "detail": "pin 99: released; pin 92: released"
+    },
+    {
+      "name": "[default build] Radxa CM3 (RK3566 + RK817-5): no static drive on pin 99 / pin 92 unless the module allows it",
+      "ok": true,
+      "detail": "pin 99: released; pin 92: released"
+    },
+    {
+      "name": "[default build] Radxa CM4 (RK3576 + RK806S-5): no static drive on pin 99 / pin 92 unless the module allows it",
+      "ok": true,
+      "detail": "pin 99: released; pin 92: released"
+    },
+    {
+      "name": "[default build] Radxa CM5 (RK3588S + RK806-1): no static drive on pin 99 / pin 92 unless the module allows it",
+      "ok": true,
+      "detail": "pin 99: released; pin 92: released"
+    },
+    {
+      "name": "[RPI_CM4 build] drives only what the RPi CM4 datasheet allows (GLOBAL_EN hold-off, RUN via 220R)",
+      "ok": true,
+      "detail": "R54 + R55 fitted, R51 DNP"
+    },
+    {
+      "name": "Added capacitance on pin 92 <= 100 nF (RK806 RESETB total <= 0.3 uF, module already ~110 nF)",
+      "ok": true,
+      "detail": "0 nF: only a DNP 0402 pad (~0.1 pF) + trace (~1 pF)"
+    },
+    {
+      "name": "Boot-critical rail rule R17-1: +3V3_SYS valid only 141..462 ms after module 3V3, i.e. AFTER every Rockchip reset release (2..16 ms) -> no BootROM device may sit on +3V3_SYS",
+      "ok": true,
+      "detail": "requirement recorded in specs/carrier_specs.md; RPi build additionally holds RUN until PWR_OK"
+    },
+    {
+      "name": "[RPI_CM4 build] RUN_PG held until PWR_OK: worst-case boot delay < 1 s",
+      "ok": true,
+      "detail": "PWR_OK at 153..490 ms after module 3V3"
+    },
+    {
+      "name": "Power-down: PWR_OK asserts (falling VIT max) above the peripheral minimum 2.7 V",
+      "ok": true,
+      "detail": "asserts between 2.76 and 3.08 V, tpd 20 us"
+    },
+    {
+      "name": "Rejected: replacing U6 by TLV809EC26 (10 ms) - still misses RK806 reset (>= 6.5+0.8 ms vs 5 ms) and raises power-down back-bias above the 0.6 V ESD limit",
+      "ok": true,
+      "detail": "back-bias 0.78 V; keep MAX809 + rule R17-1 instead"
+    }
+  ],
+  "divider": {
+    "k": 7.19,
+    "v_fall": [
+      2.7558179705882355,
+      2.9119500000000005,
+      3.076107479591837
+    ],
+    "v_rise_max": 3.168390703979592
+  },
+  "matrix": {
+    "RPi CM4 (BCM2711 + MxL7704)": {
+      "default_build_drives_99": false,
+      "default_build_drives_92": false,
+      "hold_99_allowed": true,
+      "hold_92_allowed": true
+    },
+    "Radxa CM3 (RK3566 + RK817-5)": {
+      "default_build_drives_99": false,
+      "default_build_drives_92": false,
+      "hold_99_allowed": false,
+      "hold_92_allowed": false
+    },
+    "Radxa CM4 (RK3576 + RK806S-5)": {
+      "default_build_drives_99": false,
+      "default_build_drives_92": false,
+      "hold_99_allowed": false,
+      "hold_92_allowed": false
+    },
+    "Radxa CM5 (RK3588S + RK806-1)": {
+      "default_build_drives_99": false,
+      "default_build_drives_92": false,
+      "hold_99_allowed": false,
+      "hold_92_allowed": false
+    }
+  },
+  "timeline": {
+    "RPi CM4 (BCM2711 + MxL7704)": {
+      "soc_reset_release_s": [
+        0.011,
+        null
+      ],
+      "v3v3_sys_valid_s": [
+        0.1408,
+        0.462
+      ],
+      "pwr_ok_s": [
+        0.15280000000000002,
+        0.49000000000000005
+      ],
+      "sys_before_reset": false
+    },
+    "Radxa CM3 (RK3566 + RK817-5)": {
+      "soc_reset_release_s": [
+        0.002,
+        0.012
+      ],
+      "v3v3_sys_valid_s": [
+        0.1408,
+        0.462
+      ],
+      "pwr_ok_s": [
+        0.15280000000000002,
+        0.49000000000000005
+      ],
+      "sys_before_reset": false
+    },
+    "Radxa CM4 (RK3576 + RK806S-5)": {
+      "soc_reset_release_s": [
+        0.0,
+        0.016
+      ],
+      "v3v3_sys_valid_s": [
+        0.1408,
+        0.462
+      ],
+      "pwr_ok_s": [
+        0.15280000000000002,
+        0.49000000000000005
+      ],
+      "sys_before_reset": false
+    },
+    "Radxa CM5 (RK3588S + RK806-1)": {
+      "soc_reset_release_s": [
+        0.005,
+        0.005
+      ],
+      "v3v3_sys_valid_s": [
+        0.1408,
+        0.462
+      ],
+      "pwr_ok_s": [
+        0.15280000000000002,
+        0.49000000000000005
+      ],
+      "sys_before_reset": false
+    }
+  },
+  "variants": {
+    "RADXA (default: RK3566 / RK3576 / RK3588)": {
+      "U7": false,
+      "R54": false,
+      "R55": false,
+      "R51": true
+    },
+    "RPI_CM4": {
+      "U7": true,
+      "R54": true,
+      "R55": true,
+      "R51": false
+    }
+  },
+  "parts": {
+    "U7": {
+      "mpn": "MIC803-44D3VM3-TR",
+      "lcsc": "C626181",
+      "vth": [
+        4.25,
+        4.38,
+        4.5
+      ],
+      "t_rst": [
+        0.14,
+        0.23,
+        0.36
+      ],
+      "vcc_min": 1.0,
+      "v_reset_abs": 6.0,
+      "vol": 0.3,
+      "i_leak": 1e-06,
+      "t_pd": 2e-05
+    },
+    "U8": {
+      "mpn": "TPS3808G01DBVR",
+      "lcsc": "C19653",
+      "vit": 0.405,
+      "vit_tol": 0.02,
+      "vhys_max": 0.03,
+      "i_sense": 2.5e-08,
+      "td": [
+        0.012,
+        0.02,
+        0.028
+      ],
+      "vpor": 0.8,
+      "vdd_range": [
+        1.7,
+        6.5
+      ],
+      "v_reset_abs": 6.5,
+      "i_lkg": 3e-07,
+      "vol": 0.4,
+      "t_pd": 2e-05
+    },
+    "divider": {
+      "r_top": 61900.0,
+      "r_bot": 10000.0,
+      "tol": 0.02
+    }
+  },
+  "modules": {
+    "RPi CM4 (BCM2711 + MxL7704)": {
+      "p99": "GLOBAL_EN: 100k to +5V, low = PMIC off; hold-off is the intended use",
+      "p99_hold_ok": true,
+      "p92": "RUN_PG: 10k to 3V3, may be held low via 220R (CPU reset)",
+      "p92_hold_ok": true,
+      "p92_rail": 3.3,
+      "p99_rail": 5.0,
+      "reset_release": [
+        0.011,
+        null
+      ],
+      "src": "CM4 datasheet 5.1: +1V8 >= 1 ms after 3V3, RUN_PG >= 10 ms after 1V8; pins 92/99 rows"
+    },
+    "Radxa CM3 (RK3566 + RK817-5)": {
+      "p99": "PWRON_KEY: RK817 PWRON, 17k to VCC_RTC; > 6 s low = OFF (no auto restart with 5 V present)",
+      "p99_hold_ok": false,
+      "p92": "PMIC_SLEEP_H push-pull SoC output (V1.3) / NC (V1.2)",
+      "p92_hold_ok": false,
+      "p92_rail": null,
+      "p99_rail": 1.8,
+      "reset_release": [
+        0.002,
+        0.012
+      ],
+      "src": "RK817 DS V1.7 4.1.2-4.1.4; Radxa CM3 schematic V1.2 sh.21/23; RK3566 HDG V1.1 (2 ms slots)"
+    },
+    "Radxa CM4 (RK3576 + RK806S-5)": {
+      "p99": "PWRON_L: RK806S PWRON, ~45k to VCCA = 5V; VDC strapped high -> cannot be held off",
+      "p99_hold_ok": false,
+      "p92": "RESET_L: NPOR + RK806S RESETB, 10k to 1V8; low while ON = PMIC restart",
+      "p92_hold_ok": false,
+      "p92_rail": 1.8,
+      "p99_rail": 5.0,
+      "reset_release": [
+        0.0,
+        0.016
+      ],
+      "src": "Radxa CM4 schematic V1.20 sh.5/19; RK806S DS Rev1.5 4.1.2/4.1.4 (RESETB slot 12)"
+    },
+    "Radxa CM5 (RK3588S + RK806-1)": {
+      "p99": "PWRON_L: RK806 PWRON, ~45k to VCCA = 5V + 100nF; VDC strapped high",
+      "p99_hold_ok": false,
+      "p92": "RESET_L: NPOR + RK806 RESETB, 10k to 1V8 + 100nF; low while ON = PMIC restart",
+      "p92_hold_ok": false,
+      "p92_rail": 1.8,
+      "p99_rail": 5.0,
+      "reset_release": [
+        0.005,
+        0.005
+      ],
+      "src": "Radxa CM5 X2.1/V2.21 schematic p.8/18; RK806 DS V1.2 Table 4-1 (3V3 slot 6, RESETB slot 11)"
+    }
+  }
+}
