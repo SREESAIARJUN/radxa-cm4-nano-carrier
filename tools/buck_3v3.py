@@ -531,7 +531,7 @@ def _bbox(pts):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-CELL_BBOX = _bbox([xf(p) for p in [(45.0, 6.6), (54.6, 6.6), (54.6, 24.2), (45.0, 24.2)]])   # board frame
+CELL_BBOX = _bbox([xf(p) for p in [(44.85, 6.6), (54.6, 6.6), (54.6, 24.2), (44.85, 24.2)]])   # board frame
 HOLES = {"H1": (3.5, 3.5), "H2": (51.5, 3.5), "H3": (3.5, 36.5), "H4": (51.5, 36.5)}       # 3.1 mm keep-out
 
 
@@ -807,9 +807,17 @@ def run_drc(pcb_path: Path) -> dict:
 
 
 def drc_in_scratch(text: str) -> dict:
+    """DRC a mutated board next to copies of the project files. The Rev 13 block is
+    (re-)inserted into the scratch .kicad_dru so the mutation tests exercise THIS
+    stage's rule text even if a concurrent stage has dropped it from the shared file
+    (that case is reported separately by the presence check)."""
     with tempfile.TemporaryDirectory() as td:
         for f in (PRO, DRU):
             shutil.copy(f, Path(td) / f.name)
+        d_ = Path(td) / DRU.name
+        t_ = d_.read_text()
+        if DRU_BEGIN not in t_:
+            d_.write_text(t_.rstrip() + "\n\n" + dru_text())
         p = Path(td) / PCB.name
         p.write_text(text)
         return run_drc(p)
