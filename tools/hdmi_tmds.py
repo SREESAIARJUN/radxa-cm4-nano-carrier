@@ -288,7 +288,7 @@ BUMP_EXTRA_PER_H = 2 * (math.sqrt(2) - 1)
 #   -> J2 (pads, or a via pair between / outboard of the DF40 rows).
 J4_ROT = 180.0                 # KiCad L/R flip = mirror + 180 deg; 180 here keeps the mouth at +Y
 J4_REAR_Y, J4_FRONT_Y = 33.615, 34.835
-J4_VIA_Y = 36.30               # front-row B->F via pairs, 0.97 mm in front of the front pads (room for GND stubs)
+J4_VIA_Y = 36.20               # front-row B->F via pairs, 0.87 mm in front of the front pads (room for GND ties)
 TOP_N, TOP_S = 30.400, 31.255  # B.Cu top lanes (0.855 pitch); 1.17 mm clear of the T1 courtyard (Y 29.0)
 TOP_F_N, TOP_F_S = 29.000, 29.855  # F.Cu top lanes: higher, so the TX1 riser can carry its trombone
 COL_W, COL_E = 37.300, 38.155  # columns: 0.57 mm from the X=36.5 split edge, 1.77 mm to the J4 shell leg
@@ -300,11 +300,11 @@ J2_GND_VIA_Y = 39.35
 J2_GND_PADS_X = (16.8, 18.0, 19.2)     # outer-row GND pins that get an outboard via
 STITCH_VIAS = []                       # (J4 return via is the pin-10 GND via, see J4_GND_TIES)
 # J4 SMD GND pins: 4 and 16 bond to the shell legs (THT, GND) along Y 35.6 in front of
-# pins 2/18; pin 10 runs between the D1/CLK via pairs to a GND via that is also the
-# L2<->L3 return path for both transitions. Rear-row shield pins 7/13 sit under the
-# F.Cu risers and between the B.Cu escapes: no via site (open item, README Rev 11).
-J4_GND_TIES = {"4": [(42.8, 35.6), (41.4, 35.6)], "16": [(45.2, 35.6), (46.6, 35.6)],
-               "10": [(44.0, 37.05)]}
+# pins 2/18. The GND via at (44.0, 37.05) is the L2<->L3 return path for the D1/CLK
+# transitions (plane stitch). Shield pins 7/13 (rear row, under the F.Cu risers and
+# between the B.Cu escapes) and 10 (boxed in by the D1/CLK via pairs) have no
+# connection site in this topology: open item, README Rev 11.
+J4_GND_TIES = {"4": [(42.8, 35.6), (41.4, 35.6)], "16": [(45.2, 35.6), (46.6, 35.6)]}
 J4_GND_VIA = (44.0, 37.05)
 J4_GND_TIE_W = 0.10
 J2_TX2_GND = [(22.8, 38.5), (22.8, 39.2), (22.05, 39.35)]   # pin 162 -> GND via east of the TX2 via pair
@@ -325,7 +325,7 @@ W, NORTH = (-1, 0), (0, -1)
 TROMBONE_SLOTS = {
     "TX0": [((35.5, LANE_B_N), W, +1), ((31.5, LANE_B_N), W, +1), ((27.5, LANE_B_N), W, +1)],
     "TX2": [((33.5, LANE_B_S), W, -1), ((29.5, LANE_B_S), W, -1), ((25.5, LANE_B_S), W, -1)],
-    "TX1": [((43.1, 33.20), NORTH, +1)],
+    "TX1": [((43.3, 33.20), NORTH, +1)],
     "CLK": [],
 }
 TROMBONE_MAX_DEPTH = {"TX0": 2.60, "TX2": 2.60, "TX1": 3.60, "CLK": 0.0}
@@ -335,8 +335,8 @@ TROMBONE_MAX_DEPTH = {"TX0": 2.60, "TX2": 2.60, "TX1": 3.60, "CLK": 0.0}
 BUMP_ANCHORS = {
     # >= 1.2 mm pitch: every bump (<= 0.74 mm) is followed by >= 0.46 mm of coupled pair,
     # so no contiguous uncoupled stretch exceeds 1 mm (verify checks this on the copper).
-    "CLK": [(44.9, y) for y in (35.3, 34.2, 33.1, 32.0, 30.9, 29.85)] + [(19.0, LANE_F_N)],
-    "TX1": [(43.1, 34.7)] + [(x, TOP_F_S) for x in (42.25, 41.2, 40.15, 39.1)],
+    "CLK": [(44.7, y) for y in (35.3, 34.2, 33.1, 32.0, 30.9, 29.85)] + [(19.0, LANE_F_N)],
+    "TX1": [(43.3, 34.7)] + [(x, TOP_F_S) for x in (42.25, 41.2, 40.15, 39.1)],
     "TX0": [(x, LANE_B_N) for x in (36.4, 33.0, 29.0, 24.6, 23.4, 22.2)],
     "TX2": [(x, TOP_S) for x in (41.9, 40.7, 39.5)] + [(x, LANE_B_S) for x in (35.0, 31.0, 23.0)],
 }
@@ -389,7 +389,7 @@ def via_centre_x(pair: str, pads: dict) -> float:
     xc = (p[0] + n[0]) / 2
     other = "CLK" if pair == "TX1" else "TX1"
     ox = sum(pads["J4"][PAIRS[other][k]][0] for k in (2, 3)) / 2
-    return xc + (0.30 if xc > ox else -0.30)
+    return xc + (0.10 if xc > ox else -0.10)
 
 
 def build_pair(pair: str, pads: dict, depths: list[float], bump_h: float | None, bump_net: str | None = None):
@@ -420,7 +420,8 @@ def build_pair(pair: str, pads: dict, depths: list[float], bump_h: float | None,
         Pm, Nm = [vP] + P + [j2p], [vN] + N + [j2n]
         main = "F.Cu"
         # leave the J4 front pad along its long (Y) axis toward the mouth, then the via
-        ky = J4_VIA_Y - 0.30
+        # straight out of the pad to Y 35.95 (keeps >= 0.12 mm from the partner's via), then to the via
+        ky = J4_VIA_Y - 0.35
         stubs = {pnet: ("B.Cu", [j4p, (j4p[0], ky), vP]), nnet: ("B.Cu", [j4n, (j4n[0], ky), vN])}
     # polarity: the P via / pad must be the nearer one to the P trace at both ends
     for (pp, nn_, q) in ((Pm[0], Nm[0], Pm[1]), (Pm[-1], Nm[-1], Pm[-2])):
@@ -953,7 +954,24 @@ def cmd_verify(a) -> int:
     # and inner chamfers are uncoupled by design; what matters for SI is that no
     # single contiguous uncoupled stretch is electrically long compared with the
     # signal edge (HDMI 2.0 tr ~ 0.3 UI ~ 50 ps -> limit 1.0 mm = 5.5 ps).
-    MAX_RUN = 1.1        # worst feature: J4 front pad -> via escape (1.04 mm, 0.5 mm of it inside the pad)
+    MAX_RUN = 1.0
+    # trace copper lying inside a same-net pad is pad, not transmission line: exclude it
+    pad_boxes = {}
+    for f in board.GetFootprints():
+        for pd in f.Pads():
+            if pd.GetNetname() in TMDS_NETS:
+                bb = pd.GetBoundingBox()
+                pad_boxes.setdefault(pd.GetNetname(), []).append(
+                    (tm(bb.GetLeft()), tm(bb.GetTop()), tm(bb.GetRight()), tm(bb.GetBottom())))
+
+    def inside_pad(net, a1, u1, L1):
+        out = []
+        for (x0, y0, x1, y1) in pad_boxes.get(net, []):
+            ts = [t for t in (k * 0.01 for k in range(int(L1 / 0.01) + 1))
+                  if x0 <= a1[0] + u1[0] * t <= x1 and y0 <= a1[1] + u1[1] * t <= y1]
+            if ts:
+                out.append((min(ts), max(ts)))
+        return out
     worst_gap, runs, frac = {}, {}, {}
     for p, (pn, nn, *_r) in PAIRS.items():
         gaps = []
@@ -982,15 +1000,20 @@ def cmd_verify(a) -> int:
                             gaps.append(round(dperp - TMDS_W, 4))
                         if hi > lo and abs(dperp - TMDS_PITCH) < 0.01:
                             cov.append((lo, hi))
-                    # walk the segment: covered intervals reset the run
+                    pin = inside_pad(me, a1, u1, L1)
+                    # walk the segment: covered intervals reset the run (pad copper is excluded,
+                    # neither coupled nor uncoupled)
                     cov.sort()
                     pos = 0.0
-                    for lo, hi in cov:
+                    for lo, hi, is_pad in sorted([(a_, b_, False) for a_, b_ in cov] + [(a_, b_, True) for a_, b_ in pin]):
                         if lo > pos:
                             run += lo - pos
                             worst_run = max(worst_run, run)
                         if hi > pos:
-                            tot_c += hi - max(lo, pos)
+                            if is_pad:
+                                tot -= hi - max(lo, pos)      # pad copper: neither coupled nor uncoupled
+                            else:
+                                tot_c += hi - max(lo, pos)
                             run = 0.0
                             pos = hi
                     if pos < L1:
@@ -1004,7 +1027,7 @@ def cmd_verify(a) -> int:
          all(abs(lo - TMDS_S) < 0.005 and abs(hi - TMDS_S) < 0.005 for lo, hi in worst_gap.values()),
          "; ".join(f"{p} {lo:.4f}..{hi:.4f}" for p, (lo, hi) in worst_gap.items()))
     add_(f"Longest contiguous uncoupled stretch <= {MAX_RUN} mm ({MAX_RUN * TPD_PS_PER_MM:.1f} ps << 50 ps edge; "
-         "bumps, fan-outs and chamfers measured along the copper)",
+         "bumps, fan-outs and chamfers measured along the copper, trace inside its own pad excluded)",
          all(r <= MAX_RUN for r in runs.values()),
          "; ".join(f"{p} {runs[p]:.3f} mm (coupled {frac[p] * 100:.1f} % of copper)" for p in PAIRS))
 
@@ -1095,11 +1118,11 @@ def cmd_verify(a) -> int:
         open_gnd = set()
         for x in drc.get("unconnected_items", []):
             open_gnd |= j4_gnd_pads(x)
-        must = {"4", "10", "16", "20"}
-        add_("J4 GND pins 4 (D2 shield), 10 (D0 shield), 16 (DDC/CEC GND) and the shell are connected to GND",
+        must = {"4", "16", "20"}
+        add_("J4 GND pins 4 (D2 shield), 16 (DDC/CEC GND) and the shell legs are connected to GND",
              not (open_gnd & must), f"unconnected J4 GND pads: {sorted(open_gnd) or 'none'}")
-        info.append(("J4 rear-row shield pins 7 (D1) and 13 (CLK) - KNOWN OPEN (no via site under the F.Cu risers; Rev 12)",
-                     f"unconnected now: {sorted(open_gnd & {'7', '13'}) or 'none'}"))
+        info.append(("J4 shield pins 7 (D1), 10 (D0), 13 (CLK) - KNOWN OPEN (no via/stub site in this escape; Rev 12 item)",
+                     f"unconnected now: {sorted(open_gnd & {'7', '10', '13'}) or 'none'}"))
         nontmds = sorted({x["items"][0]["description"].split("[")[1].split("]")[0] for x in drc.get("unconnected_items", [])
                           if "of J4" in json.dumps(x) and "[GND]" not in json.dumps(x)})
         info.append(("J4 low-speed nets not yet routed (HPD/CEC/DDC/+5V: out of Rev 11 scope)", ", ".join(nontmds) or "none"))

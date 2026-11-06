@@ -115,3 +115,67 @@ The four 1CT:1CT channels are identical, and swapping *both* ends of a winding p
 - **"Ultra-low-profile":** 13.1 mm is the minimum for a stocked vertical 8P8C with full plug retention. The jack is on the bottom side, so the enclosure needs 13.1 mm of clearance below the carrier.
 - **Schematic:** the J1/J2 module connectors are not yet schematic symbols, so the 8 PHY-side `Ethernet_PairN` global labels are expected ERC "dangling" warnings.
 - **DF40 pad field:** inside the 0.4 mm-pitch field, MDI stubs keep the netclass's 0.20 mm clearance to J1 pads. The 0.30 mm `mdi_isolation` rule exempts pads by design.
+
+## Revision 11.0 Engineering Changelog
+
+**Task:** Micro HDMI (Type D) connector with HDMI 2.0 100-ohm TMDS differential pairs, length-matched to within 0.15 mm.
+**Result:** all 8 TMDS nets are routed and length-matched to **0.0 µm**, measured from the saved copper (each net is 45.1256 mm pad to pad, plus one 1.551 mm via barrel).
+**Verification:** `python3 tools/hdmi_tmds.py verify` passes **26/26** checks. Report: `artifacts/rev11_hdmi_tmds_report.md`.
+
+### Changes implemented
+- **New stage `tools/hdmi_tmds.py`** (`generate` / `verify` / `solve`). It is the single source of truth for the HDMI0 TMDS breakout and should be edited instead of the copper. `generate` is idempotent: before loading the board it strips its own previous output at the S-expression level. Python deletion through pcbnew is not used because KiCad 8.0.9's SWIG bindings corrupt the board's item lists after `BOARD.Remove()` on tracks.
+  Run order: `cm4_mechanical.py generate` → `ethernet_mdi.py generate` → `hdmi_tmds.py generate`. The earlier stages rebuild the board; this one is additive.
+- **J4 = XUNPU HDMI-101S Micro-HDMI Type D** (LCSC C720620, 52k in stock).
+  - **Footprint:** `lib/radxa-cm4-nano-carrier.pretty/HDMI_Micro-D_XUNPU_HDMI-101S.kicad_mod`. The land pattern is entered numerically from the LCSC/EasyEDA footprint: 19 pads at 0.2 × 0.84 / 0.2 × 1.0 mm in two staggered 0.4 mm-pitch rows, plus 4 oval THT shell slots (Ø0.7 × 1.7 mm).
+  - **Placement:** bottom side at (44.0, 36.0). The mouth is 0.25 mm inside the Y=40 edge (zero overhang), and the shell-pad copper is 0.34 mm from the edge. The courtyard clears the H4 standoff keep-out by 0.25 mm. The THT shell legs (X ≥ 40.15) clear the top-side J2 DF40 body (ends at X 36.3).
+  - **Pin map:** 3/5 D2, 6/8 D1, 9/11 D0, 12/14 CLK, 1 HPD, 15 CEC, 17 SCL, 18 SDA, 19 `HDMI0_5V`; GND on 4/7/10/13/16 and the shell.
+- **Rev 5 envelope was not buildable.** It put uHDMI at X 34.5–41.5, where the shell legs would land inside J2's top-side body. `board_outline.dxf` (via `cm4_mechanical.py`) now carries the real J4 courtyard instead.
+- **Impedance:** W 0.165 mm / S 0.125 mm. Solved with the validated 2-D FD solver in `tools/mdi_impedance.py` for the JLC04161H-7628 stackup: Zdiff 100.03 Ω, eeff,odd 2.742, 5.52 ps/mm. The same geometry is used on L1 (over In1 GND) and L4 (over In2 GND).
+- **Routing.** Every pair follows the same topology: J4 → north → top lane → west → column (X 37.30 / 38.16) → south → strip lane → west → J2 outer-row pins 170–190.
+  - The rear-row pairs (D2→TX2, D0→TX0) run on B.Cu.
+  - The front-row pairs (D1→TX1, CLK) cannot pass between the 0.2 mm-gap rear pads. They change layer through a via pair 0.87 mm in front of J4 and run on F.Cu, inside the gap between J2's two pad rows.
+  - Every TMDS net has **exactly one via**, so the via barrel cancels in every comparison. Both outer layers are identical microstrips, so physical length equals electrical length.
+  - P/N polarity is preserved end to end with no crossovers. TX2's vias sit outboard of the J2 outer row for this reason.
+- **Length matching** (solved, then measured back from the copper):
+  - *Inter-pair:* chamfered trombones. TX2 gets 3 × 2.45 mm and TX0 3 × 2.58 mm on B.Cu, interleaved between the two strip lanes. TX1 gets 1 × 3.20 mm on its F.Cu riser. Each is found by bisection on the measured length. CLK is naturally the longest and sets the 45.1256 mm target.
+  - *Intra-pair:* each route turns a net four 45° left, so P is always the inner trace. It starts 0.89–1.03 mm short (4·d·tan 22.5° = 0.24 mm per 45° turn at a 0.29 mm pitch). This is cancelled by 5–7 single-sided 45° phase bumps on P (h 0.18–0.22 mm, 0.3 mm flat), placed at ≥ 1.05 mm pitch so no contiguous uncoupled stretch exceeds 1 mm.
+- **Return path and grounding:**
+  - TMDS uses the existing In1/In2 GND planes. A full GND pour is added only on a bare board.
+  - Outboard GND vias are placed on J2 pins 186/180/192, plus a GND via 0.73 mm east of the TX2 transition (tied to pin 162) and a plane-stitch via 0.93 mm from the D1/CLK transitions.
+  - J4 pins 4 and 16 bond to the GND shell legs.
+- **Rules:**
+  - `.kicad_pro` gets an `HDMI_TMDS` net class: 0.165 mm width / 0.125 mm gap, 0.50/0.30 mm vias (the project minimums), with exact-name patterns because KiCad patterns are glob-only.
+  - `.kicad_dru` gets a fenced block (only this block is replaced on regeneration; other stages' blocks are kept):
+    - `hdmi0_tmds_skew_<pair>` at max 0.075 mm. KiCad 8 measures `skew` against the group average, so a two-net group gives |P−N| ≤ 0.15 mm.
+    - `hdmi0_tmds_length_window` at L ± 0.075 mm on all 8 nets, for inter-pair matching.
+    - Track width 0.160–0.170 mm.
+    - Diff-pair gap ≥ 0.115 mm.
+    - 0.20 mm TMDS-to-other clearance.
+    - One via per net.
+
+### Architecture improvements
+- **Co-designed floor plan.** The concurrent Ethernet stage owns an `ETH_SHIELD` island and its 2 mm hi-pot split (no GND for X < 36.5 and 9.8 < Y < 33.5), plus RJ45 J3, T1, and MDI routing down the east side. Two earlier J4 placements I tried (left edge, right edge) collided with successive versions of that plan. The final placement keeps every TMDS segment inside the solid-GND "L" (X > 36.5, or Y > 34.1). The verifier samples 10,827 points along and ±0.28 mm beside every segment and confirms each one lies over *filled* GND. Any future floor-plan change that puts TMDS over the split will fail loudly.
+- **The verifier measures the copper, not the model.** Every check reads lengths, gaps, coupled intervals (chained segment by segment), reference-plane fill, return-via distances, pad connectivity and mechanics from the saved board with pcbnew. kicad-cli then runs DRC on the real rules.
+- **Mutation tests are baseline-relative.** Each one must create a *new* violation on TMDS copper: lengthening one N trace by 0.20 mm must raise `skew_out_of_range`, and adding a GND track 0.15 mm from a TMDS trace must raise `clearance`. Pre-existing violations from other stages can't satisfy them.
+- **Independent review:** a 3-lens adversarial review with per-finding refutation confirmed six findings. Four are fixed: a DRU-block deletion that would have wiped the Rev 13/Rev 9 rules, the wrong skew-rule semantics, unconnected J4 GND pins, and a missing TX2 return via. Two are recorded as open items below.
+
+### Validation status
+| Item | Status |
+|---|---|
+| All 8 TMDS nets: max − min ≤ 0.15 mm (inter- **and** intra-pair) | **PASS**: 0.0 µm (0.000 ps) |
+| Coupled gap 0.125 mm on every coupled run; pair-to-pair ≥ 0.40 mm | **PASS**: 0.1250 mm / 0.400 mm |
+| Longest contiguous uncoupled stretch ≤ 1.0 mm (5.5 ps ≪ ~50 ps edge) | **PASS**: 0.85–0.94 mm |
+| Every TMDS segment over filled GND (outside the 0.75 mm via-transition zones) | **PASS**: 0 off-plane of 10,827 samples |
+| GND return within 2.0 mm of every layer change | **PASS**: 0.73–1.72 mm |
+| kicad-cli DRC, violations touching TMDS / J4 | **PASS**: 0 |
+| DRU mutation tests (skew, clearance) | **PASS**: both caught |
+| Insertion length vs HDMI 2.0 (UI 168 ps at 5.94 Gbit/s) | 45.13 mm = 249 ps; 0.15 mm = 0.83 ps = 0.5 % UI |
+| Whole-board DRC | **Not clean (other stages):** 162 items, none touching TMDS/J4 (mostly Ethernet-stage clearance) |
+
+**Open items (Rev 12+):**
+1. J4 shield pins **7, 10, 13** are not connected yet. There is no via site under the F.Cu risers or between the J4 via pairs. Fixing this needs via-in-pad, or a re-planned D1/CLK escape.
+2. **TPD4E05U06 ESD** (required by `specs/carrier_specs.md`) is not placed. It will need flow-through placement next to J4 and a re-solve of the length matching through its pads.
+3. **`HDMI0_5V`** (pin 19) has no source yet. It needs a current-limited, back-drive-protected 5 V feed.
+4. HPD, CEC and DDC are not routed yet.
+5. J4 is not in the schematic yet, so schematic/PCB parity is open.
+6. The connector mouth/body outline is approximate. Confirm it against the XUNPU mechanical drawing before release.

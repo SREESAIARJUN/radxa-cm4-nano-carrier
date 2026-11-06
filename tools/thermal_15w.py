@@ -75,6 +75,9 @@ Sources [D] and engineering assumptions [A] (assumptions are swept / flagged)
 [A5] TIMs: gap pad k 6.0 W/mK, 1.0 mm free height, usable compression
      10..50 %, ~0.14 MPa at 50 %; phase-change (spring-loaded) 0.03 mm BLT,
      0.08 K cm^2/W.
+[A7] DRAM + PMIC carry the non-SoC module heat; each gets a gap pad to the
+     dissipator (theta junction->top 6 K/W, 10 x 14 mm pad). Positions are
+     module-specific -> confirm on the Radxa CM4 module drawing.
 [A6] Mass the compute module may carry through its 4 M2.5 holes without
      overloading the DF40 pair / module PCB in a 50 g, 11 ms shock: 60 g.
 """
@@ -167,9 +170,21 @@ class FinSink:
 
 
 SINK_FOOT = FinSink("55 x 40 x 15 footprint sink", 55e-3, 40e-3, 3.0e-3, 15e-3)
-# Remote sink: smallest standard 130 x 95 extrusion above the size_remote_sink() minimum for B1
-# (128 x 93 mm at the gate). The same dissipator is given to A2/A4 for an apples-to-apples comparison.
-SINK_REMOTE = FinSink("130 x 95 x 20 remote / enclosure-wall sink", 130e-3, 95e-3, 4.0e-3, 20e-3)
+# Remote sink: STARTING POINT only. calc() re-sizes it with size_remote_sink() for B1 at the gate and
+# rounds W/L up to the next 5 mm extrusion step; the same dissipator is then given to A2/A4 so the
+# comparison is apples-to-apples (only the heat-acquisition hardware differs).
+SINK_REMOTE = FinSink("remote / enclosure-wall sink", 130e-3, 95e-3, 4.0e-3, 20e-3)
+# Secondary path for the module-PCB heat (DRAM + PMIC, [A7]): 1.0 mm gap pads (k 6, 30 % compressed) from
+# the top of both packages to the dissipator (pedestal sink underside, or a 40 x 30 x 1 mm Cu saddle
+# soldered to the heat-pipe evaporator block). Package junction->top 6 K/W each (LPDDR/PMIC class).
+SEC_PADS = dict(n=2, theta_top=6.0, area=140e-6, t=0.7e-3, k=6.0, saddle=(40e-3, 30e-3, 1.0e-3))
+
+
+def g_secondary() -> float:
+    r_pad = SEC_PADS["t"] / (SEC_PADS["k"] * SEC_PADS["area"])
+    return SEC_PADS["n"] / (SEC_PADS["theta_top"] + r_pad)
+
+
 MASS_ON_MODULE_MAX_G = 60.0         # [A6] carried by 4x M2.5 + the DF40 pair (50 g / 11 ms shock -> ~30 N)
 
 
@@ -693,12 +708,15 @@ def solve_concept(c: Concept, ta: float, load: LoadCase, soc: Soc = Soc(), hp: H
             gap = ped.base_clear - 1.0e-3            # mean component height ~1 mm
             p = air((T["M"] + T["S"]) / 2)
             a_cov = min(s.W * s.L, A_BOARD) - ped.tip[0] * ped.tip[1]
-            g_ms = p["k"] * a_cov / gap + h_rad(T["M"], T["S"], 1 / (1 / 0.9 + 1 / 0.85 - 1)) * a_cov
+            g_ms = p["k"] * a_cov / gap + h_rad(T["M"], T["S"], 1 / (1 / 0.9 + 1 / 0.85 - 1)) * a_cov + g_secondary()
+            g_mx = 0.0
             g_ma = g_surface_to_amb(T["M"], ta, max(A_BOARD - a_cov, 0) + 2 * (BOARD_W + BOARD_H) * 1e-3 * MOD_T,
                                     BOARD_H * 1e-3)
         else:
             g_ms = 0.0
-            g_ma = g_surface_to_amb(T["M"], ta, a_mod_open, BOARD_H * 1e-3)
+            g_mx = g_secondary()
+            g_ma = g_surface_to_amb(T["M"], ta, a_mod_open - SEC_PADS["saddle"][0] * SEC_PADS["saddle"][1]
+                                    + hp.block[0] * hp.block[1], BOARD_H * 1e-3)
         g_ka = g_surface_to_amb(T["K"], ta, A_BOARD, BOARD_H * 1e-3)
         # Linear network: nodes J, C, X, S, M, K ; ambient fixed.
         names = ["J", "C", "X", "S", "M", "K"]
@@ -728,6 +746,7 @@ def solve_concept(c: Concept, ta: float, load: LoadCase, soc: Soc = Soc(), hp: H
             link("X", "S", g_xs)
         link("S", "A", g_sa)
         link("M", "S", g_ms)
+        link("M", "X", g_mx)
         link("M", "A", g_ma)
         link("M", "K", g_mc)
         link("K", "A", g_ka)
@@ -744,9 +763,10 @@ def solve_concept(c: Concept, ta: float, load: LoadCase, soc: Soc = Soc(), hp: H
     q_out = (g_sa * (T["S"] - ta) + g_ma * (T["M"] - ta) + g_ka * (T["K"] - ta))
     q_in = q_j + q_m + carrier_q
     flows = dict(sink=g_sa * (T["S"] - ta), module_surface=g_ma * (T["M"] - ta), carrier=g_ka * (T["K"] - ta),
-                 jb=(T["J"] - T["M"]) / soc.theta_jb, module_to_carrier=g_mc * (T["M"] - T["K"]))
+                 jb=(T["J"] - T["M"]) / soc.theta_jb, module_to_carrier=g_mc * (T["M"] - T["K"]),
+                 module_to_dissipator=g_ms * (T["M"] - T["S"]) + g_mx * (T["M"] - T["X"]))
     return dict(T=T, ta=ta, sink=sink_r, g_sa=g_sa, r_sa=1 / g_sa, parts=parts, q_in=q_in, q_out=q_out,
-                flows=flows, iters=it, g_mc=g_mc, g_ma=g_ma, g_ka=g_ka, g_ms=g_ms,
+                flows=flows, iters=it, g_mc=g_mc, g_ma=g_ma, g_ka=g_ka, g_ms=g_ms, g_mx=g_mx,
                 r_ja_eff=(T["J"] - ta) / max(q_in, 1e-9))
 
 
@@ -778,7 +798,8 @@ def transient(c: Concept, ta: float, load: LoadCase, steady: dict, hp: HeatPipe 
         c_x = 0.0
     else:
         bx, by, bz = hp.block
-        c_x = bx * by * bz * CU.rho * CU.cp + 0.0
+        sx_, sy_, sz_ = SEC_PADS["saddle"]
+        c_x = (bx * by * bz + sx_ * sy_ * sz_ - bx * by * sz_) * CU.rho * CU.cp
         v_sink += 0.0
     hp_mass = 0.0
     if c.kind == "heatpipe":
@@ -813,6 +834,7 @@ def transient(c: Concept, ta: float, load: LoadCase, steady: dict, hp: HeatPipe 
         link("X", "S", 1 / (pr["vapour"] + pr["condenser"] + pr["base"]))
     link("S", "A", steady["g_sa"])
     link("M", "S", steady["g_ms"]) if steady["g_ms"] > 0 else None
+    link("M", "X", steady["g_mx"]) if steady["g_mx"] > 0 else None
     link("M", "A", steady["g_ma"])
     link("M", "K", steady["g_mc"])
     link("K", "A", steady["g_ka"])
@@ -852,11 +874,11 @@ def transient(c: Concept, ta: float, load: LoadCase, steady: dict, hp: HeatPipe 
 # ==========================================================================
 # 8. Study
 # ==========================================================================
-def p_sustain(c: Concept, ta: float, load: LoadCase, target: float = TJ_THROTTLE, **kw) -> float:
+def p_sustain(c: Concept, ta: float, load: LoadCase, target: float = TJ_THROTTLE, node: str = "J", **kw) -> float:
     lo, hi = 0.0, 3.0
     for _ in range(18):
         m = (lo + hi) / 2
-        if solve_concept(c, ta, load, p_scale=m, **kw)["T"]["J"] <= target:
+        if solve_concept(c, ta, load, p_scale=m, **kw)["T"][node] <= target:
             lo = m
         else:
             hi = m
@@ -919,7 +941,7 @@ def calc() -> dict:
         gs["fits_rss"], f"stack RSS +/-{gs['rss_mm']:.3f} mm in window {gs['gap_min_mm']:.2f}..{gs['gap_max_mm']:.2f} mm "
         f"(nominal {gs['gap_nom_mm']:.2f}); 'worst TIM' columns use nominal + RSS = {gs['worst_gap_mm']:.2f} mm")
     chk("Rigid-pedestal TIM gap: arithmetic worst-case stack fits the window (info: RSS is the release criterion)",
-        gs["fits_wc"], f"stack WC +/-{gs['wc_mm']:.2f} mm (RSS {gs['rss_mm']:.3f}) vs window "
+        gs["fits_wc"], gate=False, detail=f"stack WC +/-{gs['wc_mm']:.2f} mm (RSS {gs['rss_mm']:.3f}) vs window "
         f"{gs['gap_min_mm']:.2f}..{gs['gap_max_mm']:.2f} mm, nominal {gs['gap_nom_mm']:.2f} mm, pedestal "
         f"{gs['pedestal_h_mm']:.2f} mm")
     chk("Gap-pad clamp load on the SoC package at 50 % compression <= 40 N", gs["pkg_force_N_at_50pct"] <= 40.0,
@@ -928,7 +950,19 @@ def calc() -> dict:
         hp.spring_force_N <= 40.0 and hp.spring_force_N / (Soc().pkg[0] * Soc().pkg[1]) >= 0.1e6,
         f"{hp.spring_force_N:.0f} N -> {hp.spring_force_N / (Soc().pkg[0] * Soc().pkg[1]) / 1e6:.2f} MPa")
 
-    for c in CONCEPTS:
+    # ---- size the shared remote sink on B1 (passive heat pipe) and round up to 5 mm steps
+    b1 = next(x for x in CONCEPTS if x.key == "B1")
+    sz = size_remote_sink(b1, TA_GATE, LOADS[0], TJ_THROTTLE - TJ_MARGIN, q_k)
+    L_r = math.ceil(sz["L_mm"] / 5 - 1e-9) * 5e-3
+    W_r = math.ceil(sz["W_mm"] / 5 - 1e-9) * 5e-3
+    remote = replace(SINK_REMOTE, name=f"{W_r*1e3:.0f} x {L_r*1e3:.0f} x {SINK_REMOTE.H*1e3:.0f} remote / enclosure-wall sink",
+                     W=W_r, L=L_r)
+    out["remote_sink"] = dict(asdict(remote), sized_min=sz)
+    concepts = [replace(c, sink=remote, title=c.title.replace("130x95x20", f"{W_r*1e3:.0f}x{L_r*1e3:.0f}x20"))
+                if c.sink is SINK_REMOTE else c for c in CONCEPTS]
+    out["inputs"]["sinks"][remote.name] = asdict(remote)
+
+    for c in concepts:
         res = dict(title=c.title, kind=c.kind, sink=c.sink.name, forced=c.forced, tim=c.tim, corners={})
         for load in LOADS:
             for ta in TA_CORNERS:
@@ -959,6 +993,8 @@ def calc() -> dict:
                     pg = p_sustain(c, ta, load, carrier_q=q_k)
                     rg = solve_concept(c, ta, load, carrier_q=q_k, p_scale=pg / (load.p_soc + load.p_module_pcb))
                     gov[key] = dict(P=pg, T_module=rg["T"]["M"], T_carrier=rg["T"]["K"], TJ=rg["T"]["J"])
+                if gov[key]["T_module"] > DF40_TMAX:     # mitigation: power cap that keeps the DF40 in rating
+                    gov[key]["P_cap_df40"] = p_sustain(c, ta, load, target=DF40_TMAX, node="M", carrier_q=q_k)
         res["governed"] = gov
         if c.kind == "heatpipe":
             tv = st["T"]["X"]
@@ -973,14 +1009,14 @@ def calc() -> dict:
                               A_v_mm2=hp.A_v * 1e6, A_w_mm2=hp.A_w * 1e6, L_total_mm=hp.L_total * 1e3,
                               L_eff_mm=hp.L_eff * 1e3))
         if not c.forced:
-            res["sizing_gate"] = size_remote_sink(c, TA_GATE, L0, TJ_THROTTLE - TJ_MARGIN, q_k) \
-                if c.sink is SINK_REMOTE else None
+            res["sizing_gate"] = (sz if c.key == "B1" else size_remote_sink(c, TA_GATE, L0, TJ_THROTTLE - TJ_MARGIN, q_k)) \
+                if c.sink is remote else None
         out["concepts"][c.key] = res
 
     # --- sensitivity (B1 and A3 at the gate)
     sens = {}
     for key in ("A3", "B1"):
-        c = next(x for x in CONCEPTS if x.key == key)
+        c = next(x for x in concepts if x.key == key)
         base_tj = solve_concept(c, TA_GATE, LOADS[0], carrier_q=q_k)["T"]["J"]
         rows = {}
         for lab, soc in (("thetaJC x0.5", replace(Soc(), theta_jc=Soc().theta_jc * 0.5)),
@@ -1035,7 +1071,8 @@ def calc() -> dict:
         chk(f"{k}: DF40 receptacles (module PCB node) <= {DF40_TMAX:.0f} C at every corner and load split "
             "(power capped by the 85 C governor)", g_["T_module"] <= DF40_TMAX,
             f"max T_module {g_['T_module']:.1f} C at {kmax.split('|')[0].split(' (')[0]}, TA {kmax.split('|')[1]} C, "
-            f"P {g_['P']:.1f} W", gate=(k == rec))
+            f"P {g_['P']:.1f} W" + (f"; mitigation: firmware cap {g_['P_cap_df40']:.1f} W at this corner"
+                                    if "P_cap_df40" in g_ else ""), gate=(k == rec))
     for k, v in out["concepts"].items():
         tk = max(x["T_carrier"] for x in v["governed"].values())
         i_lim, _ = buck_derate_at(tk)
@@ -1320,6 +1357,7 @@ def scad_text(r: dict | None = None) -> str:
         g = f"{LOADS[0].name}|{TA_GATE:.0f}"
         n_foot = r["concepts"]["A1"]["corners"][g]["n_fins"]
         n_rem = r["concepts"]["B1"]["corners"][g]["n_fins"]
+    rw, rl = (r["remote_sink"]["W"], r["remote_sink"]["L"]) if r else (SINK_REMOTE.W, SINK_REMOTE.L)
     n_foot = n_foot or 9
     n_rem = n_rem or 14
     sx, sy = Soc().centre
@@ -1349,7 +1387,7 @@ A_TB = {SINK_FOOT.tb*1e3:.1f}; A_H = {SINK_FOOT.H*1e3:.1f}; A_TF = {SINK_FOOT.tf
 BLK = [{hp.block[0]*1e3:.1f}, {hp.block[1]*1e3:.1f}, {hp.block[2]*1e3:.1f}];
 HP_W = {hp.flat_width*1e3:.3f}; HP_T = {hp.t_flat*1e3:.2f};
 HP_LA = {hp.L_a*1e3:.1f}; HP_LC = {hp.L_c*1e3:.1f}; HP_RB = {3*hp.d*1e3:.1f};
-R_W = {SINK_REMOTE.W*1e3:.1f}; R_L = {SINK_REMOTE.L*1e3:.1f}; R_TB = {SINK_REMOTE.tb*1e3:.1f};
+R_W = {rw*1e3:.1f}; R_L = {rl*1e3:.1f}; R_TB = {SINK_REMOTE.tb*1e3:.1f};
 R_H = {SINK_REMOTE.H*1e3:.1f}; R_TF = {SINK_REMOTE.tf*1e3:.1f}; R_N = {n_rem};
 
 module_top = CAR_T + STACK_H + MOD_T;
