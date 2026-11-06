@@ -38,8 +38,9 @@ Electrical design
   Every pair keeps its polarity end-to-end (checked from the copper).
 
 Controlled impedance - see tools/mdi_impedance.py (single source of truth):
-  JLC04161H-7628 stackup, L1/L4 microstrip over solid L2/L3 reference,
-  W = 0.165 mm, S = 0.125 mm -> 100.0 ohm differential (2-D field solver).
+  JLC04161H-2313 stackup (Rev 19; was JLC04161H-7628), L1/L4 microstrip over the
+  L2 GND plane / L3 GND reference partition, W = 0.125 mm, S = 0.165 mm (0.29 mm
+  pitch, unchanged since Rev 9) -> 99.7 ohm differential (2-D field solver).
 """
 from __future__ import annotations
 
@@ -71,12 +72,12 @@ LIBNAME = "radxa-cm4-nano-carrier"
 # ---------------------------------------------------------------------------
 # 1. Constants
 # ---------------------------------------------------------------------------
-W = Z.MDI_W                  # 0.165
-S = Z.MDI_S                  # 0.125
+W = Z.MDI_W                  # 0.125 (Rev 19, JLC04161H-2313)
+S = Z.MDI_S                  # 0.165
 PITCH = W + S                # 0.290 centre-to-centre
 HP = PITCH / 2
 VIA_D, VIA_DRILL = 0.50, 0.30          # project minimums (.kicad_pro: via 0.50 / drill 0.30, annulus 0.10)
-VIA_LEN = round(2 * Z.STACKUP.h_pp + Z.STACKUP.h_core + 2 * Z.STACKUP.t_inner + Z.STACKUP.t_outer, 4)  # F.Cu->B.Cu barrel, as KiCad counts it (1.5512)
+VIA_LEN = Z.STACKUP.via_len  # F.Cu->B.Cu barrel, as KiCad counts it (2313: 1.5304; 7628 was 1.5512)
 VIA_PITCH = 0.65                       # MDI via-pair pitch -> 0.15 mm P-N via gap (netclass clearance 0.12)
 GROUP = "REV9_ETH_MDI"                 # every item this stage adds is a member (idempotent re-runs, DRC attribution)
 CHAMFER = 0.6                          # centreline 45-degree corner cut
@@ -617,11 +618,11 @@ STACKUP_SEXPR = f"""		(stackup
 			(layer "F.Paste" (type "Top Solder Paste"))
 			(layer "F.Mask" (type "Top Solder Mask") (thickness {Z.STACKUP.t_mask}) (material "LPI") (epsilon_r {Z.STACKUP.er_mask}) (loss_tangent 0.025))
 			(layer "F.Cu" (type "copper") (thickness {Z.STACKUP.t_outer}))
-			(layer "dielectric 1" (type "prepreg") (thickness {Z.STACKUP.h_pp}) (material "7628") (epsilon_r {Z.STACKUP.er_pp}) (loss_tangent {Z.STACKUP.tan_d}))
+			(layer "dielectric 1" (type "prepreg") (thickness {Z.STACKUP.h_pp}) (material "{Z.STACKUP.pp_material}") (epsilon_r {Z.STACKUP.er_pp}) (loss_tangent {Z.STACKUP.tan_d}))
 			(layer "In1.Cu" (type "copper") (thickness {Z.STACKUP.t_inner}))
-			(layer "dielectric 2" (type "core") (thickness {Z.STACKUP.h_core}) (material "FR4") (epsilon_r {Z.STACKUP.er_core}) (loss_tangent {Z.STACKUP.tan_d}))
+			(layer "dielectric 2" (type "core") (thickness {Z.STACKUP.h_core}) (material "{Z.STACKUP.core_material}") (epsilon_r {Z.STACKUP.er_core}) (loss_tangent {Z.STACKUP.tan_d}))
 			(layer "In2.Cu" (type "copper") (thickness {Z.STACKUP.t_inner}))
-			(layer "dielectric 3" (type "prepreg") (thickness {Z.STACKUP.h_pp}) (material "7628") (epsilon_r {Z.STACKUP.er_pp}) (loss_tangent {Z.STACKUP.tan_d}))
+			(layer "dielectric 3" (type "prepreg") (thickness {Z.STACKUP.h_pp}) (material "{Z.STACKUP.pp_material}") (epsilon_r {Z.STACKUP.er_pp}) (loss_tangent {Z.STACKUP.tan_d}))
 			(layer "B.Cu" (type "copper") (thickness {Z.STACKUP.t_outer}))
 			(layer "B.Mask" (type "Bottom Solder Mask") (thickness {Z.STACKUP.t_mask}) (material "LPI") (epsilon_r {Z.STACKUP.er_mask}) (loss_tangent 0.025))
 			(layer "B.Paste" (type "Bottom Solder Paste"))
@@ -891,7 +892,7 @@ def generate_board():
 
     # --- documentation on User layers
     for txt, (x, y), layer in [
-        ("ETH MDI: 4x 100R diff W0.165/S0.125 (JLC04161H-7628, L1/L4 microstrip)", (27.5, 17.0), pcbnew.Cmts_User),
+        (f"ETH MDI: 4x 100R diff W{W}/S{S} ({Z.STACKUP.name}, L1/L4 microstrip)", (27.5, 17.0), pcbnew.Cmts_User),
         ("ETH_SHIELD | 2.0 mm SPLIT | GND (In1/In2)", (20.0, 32.6), pcbnew.Cmts_User),
         ("ETH", (J3_AT[0], 29.6), pcbnew.B_SilkS),
     ]:
@@ -943,17 +944,19 @@ def dru_text() -> str:
              f"  (condition \"{MDI_COND}\")",
              f"  (constraint track_width (min {W - 0.01:.3f}mm) (opt {W:.3f}mm) (max {W + 0.01:.3f}mm))",
              f"  (constraint diff_pair_gap (min {S - 0.01:.3f}mm) (opt {S:.3f}mm) (max {S + 0.36:.3f}mm))",
-             "  # gap max admits the 0.35 mm skew trombones; nominal 0.125 coupling is generated + verified",
+             f"  # gap max admits the 0.35 mm skew trombones; nominal {S} coupling is generated + verified",
              f"  (constraint diff_pair_uncoupled (max {Z.MDI_MAX_UNCOUPLED:.1f}mm))",
              f"  (constraint length (max {Z.MDI_MAX_LEN:.1f}mm))",
              "  (constraint via_count (max 2)))",
              "",
-             "# P-N of the same pair: the coupled gap S sets the clearance (independent of any netclass).",
+             "# P-N of the same pair: the coupled gap S sets the TRACK-to-track clearance (independent of",
+             "# any netclass).  Rev 19: scoped to tracks - the P-N via pair (pitch 0.65, 0.15 mm edge gap)",
+             "# and pad fan-outs are governed by the 0.12 mm netclass clearance, not by S (0.165 on 2313).",
              "(rule \"mdi_intrapair\"",
-             f"  (condition \"{MDI_COND} && A.isCoupledDiffPair()\")",
+             f"  (condition \"{MDI_COND} && A.isCoupledDiffPair() && A.Type == 'Track' && B.Type == 'Track'\")",
              f"  (constraint clearance (min {S - 0.005:.3f}mm)))",
              "",
-             "# MDI copper keeps >= 0.30 mm (~1.4 h, > 2 W) from every other net's tracks, vias and",
+             "# MDI copper keeps >= 0.30 mm (3 h on 2313, > 2 W) from every other net's tracks, vias and",
              "# plane edges.  Pads are excluded: the DF40 (0.4 mm pitch) and transformer pad fields",
              "# set their own spacing (0.20 mm default clearance applies there).",
              "(rule \"mdi_isolation\"",
@@ -1272,7 +1275,11 @@ def cmd_verify(_a=None) -> int:
         return tm(b.GetX()), tm(b.GetY()), tm(b.GetRight()), tm(b.GetBottom())
     on_b = all(fps[r].IsFlipped() for r in ("T1", "J3", "C14", "R14", "C15"))
     C.add("MECH-side", "T1, J3 and 1206 HV parts on the bottom side (top side is under the module, <= 1.2 mm)", on_b)
-    tops = [r for r, fp in fps.items() if not fp.IsFlipped() and r[0] in "CR" and r[1:].isdigit() and int(r[1:]) >= 10]
+    # Scope = this stage's own parts (REV9 group). Other stages may legitimately place taller-but-legal
+    # top-side parts (e.g. Rev 17's 0.55 mm 0603 bridges); they are height-checked by their own verifiers.
+    rev9 = {it.m_Uuid.AsString() for g in board.Groups() if g.GetName() == "REV9_ETH_MDI" for it in g.GetItems()}
+    tops = [r for r, fp in fps.items() if not fp.IsFlipped() and r[0] in "CR" and r[1:].isdigit() and int(r[1:]) >= 10
+            and (not rev9 or fp.m_Uuid.AsString() in rev9)]
     tall = [r for r in tops if "0402" not in fps[r].GetFPIDAsString()]
     C.add("MECH-top-height", f"top-side Ethernet passives are 0402 (<= 0.55 mm) under the {M.TOP_SIDE_MAX_COMPONENT_H} mm limit",
           not tall, f"{len(tops)} top-side parts; non-0402: {tall or 'none'}")
@@ -1401,14 +1408,14 @@ def write_report(C, skew_rows, unc, d):
     L = ["# Rev 9.0 Gigabit Ethernet MDI - Signal-Integrity & DRC Report", "",
          "Generated by `tools/ethernet_mdi.py verify`. Impedance source of truth: `tools/mdi_impedance.py`.", "",
          f"**Overall: {'PASS' if C.ok else 'FAIL'}** ({sum(r[2] for r in C.rows)}/{len(C.rows)} checks)", "",
-         "## Impedance (JLC04161H-7628, L4 over L3 / L1 over L2)", "",
+         f"## Impedance ({Z.STACKUP.name}, L4 over L3 / L1 over L2)", "",
          "| Model | Zdiff | Zodd | Zcomm |", "|---|---|---|---|",
          f"| 2-D FD field solver, solder-masked (sign-off) | {fd['zdiff']:.2f} | {fd['zodd']:.2f} | {fd['zcomm']:.2f} |",
          f"| 2-D FD field solver, bare copper | {fn['zdiff']:.2f} | {fn['zodd']:.2f} | {fn['zcomm']:.2f} |",
          f"| Kirschning-Jansen closed form, bare | {cf['zdiff']:.2f} | {cf['zodd']:.2f} | {cf['zcomm']:.2f} |", "",
          f"Geometry W = {W} mm, S = {S} mm, pitch {PITCH:.3f} mm; eeff(odd) {fd['eeff_odd']:.3f} -> "
          f"{math.sqrt(fd['eeff_odd']) / Z.C0 * 1e9:.3f} ps/mm.", "",
-         "## Intra-pair lengths (track + one 1.5512 mm F.Cu->B.Cu barrel per via, as KiCad's skew rule counts them)", "",
+         f"## Intra-pair lengths (track + one {VIA_LEN} mm F.Cu->B.Cu barrel per via, as KiCad's skew rule counts them)", "",
          "| Segment | P (mm) | N (mm) | Skew (mm) | Uncoupled (mm, P leg) |", "|---|---|---|---|---|"]
     for k, lp, ln, dd in skew_rows:
         L.append(f"| {k} | {lp:.3f} | {ln:.3f} | {dd:.3f} | {unc.get(k, 0):.2f} |")
@@ -1647,7 +1654,7 @@ def cmd_schematic(_a=None) -> int:
     note = ("REV 9 ETHERNET MDI (tools/ethernet_mdi.py schematic): CM4 PHY pairs -> T1 H5007NL -> J3 RJ45 (T568).\\n"
             "ch1..ch4 = Pair3, Pair1, Pair2, Pair0; P on TDk-/MXk- (both winding ends swapped = polarity kept).\\n"
             "TCTx: 100 nF each to GND (voltage-mode PHY, never shorted). MCTx: 75R Bob Smith -> 1 nF/2 kV -> ETH_SHIELD.\\n"
-            "ETH_SHIELD = In1/In2 island + J3 shield, 1M || 1 nF/2 kV to GND. 100R diff W0.165/S0.125 (mdi_impedance.py).")
+            "ETH_SHIELD = In1/In2 island + J3 shield, 1M || 1 nF/2 kV to GND. 100R diff W0.125/S0.165 on JLC04161H-2313 (mdi_impedance.py).")
     new.append(f'  (text "{note}"\n    (exclude_from_sim no)\n    (at {X0} {Y0 - 5.08} 0)\n'
                f'    (effects (font (size 1.27 1.27)) (justify left bottom))\n    (uuid "{_uid("note")}")\n  )')
     si = [k for k, it in enumerate(keep) if it.startswith("(sheet_instances")]

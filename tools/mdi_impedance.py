@@ -20,17 +20,27 @@ Two INDEPENDENT impedance models are used and must agree:
 The FD solver is the sign-off number; the closed form is a sanity cross-check
 (it ignores the solder mask, which typically lowers Zdiff by 2-4 ohm).
 
-Stackup: JLCPCB JLC04161H-7628 (1.6 mm, 4 layer) - the board's 1.6 mm FR4
-4-layer build in specs/carrier_specs.md.
+Stackup (Rev 19): JLCPCB JLC04161H-2313 (1.6 mm nominal, 4 layer, impedance
+controlled).  Thin 2313 prepreg puts each outer layer 0.1 mm from its plane, so
+loop inductance, crosstalk (~1/(1+(D/h)^2)) and plane-pair coupling are all far
+better than with the former 7628 build (h 0.2104 mm).  See tools/stackup_2313.py.
 
     L1 F.Cu    35 um  (1 oz finished)       signal  -> ref L2
-    PP 7628   210.4 um  er 4.4
-    L2 In1.Cu  15.2 um (0.5 oz)            GND plane (solid)
-    Core     1065 um   er 4.6
-    L3 In2.Cu  15.2 um                      GND plane (solid under MDI)
-    PP 7628   210.4 um  er 4.4
-    L4 B.Cu    35 um                        signal (MDI) -> ref L3
+    PP 2313   100 um   er 4.05 (RC 57 %)
+    L2 In1.Cu  15.2 um (0.5 oz)            GND plane (dedicated, solid)
+    Core     1265 um   er 4.6
+    L3 In2.Cu  15.2 um                      split plane: GND reference partitions under
+                                            every L4 controlled-impedance route + ETH_SHIELD
+                                            island + +5V_IN / +3V3_SYS power partitions
+    PP 2313   100 um   er 4.05
+    L4 B.Cu    35 um                        signal (MDI, TMDS) -> ref L3 GND partition
     Solder mask 10 um er 3.8 both sides
+
+Rev 9 -> Rev 19 history: the original JLC04161H-7628 build (PP 0.2104 mm er 4.4,
+core 1.065) gave W 0.165 / S 0.125 = 100.03 ohm.  On 2313 that copper would read
+84 ohm (-16 %), so Rev 19 re-solved W at the SAME 0.29 mm centreline pitch
+(W 0.125 / S 0.165 = 99.7 ohm): every routed centreline is unchanged, only the
+drawn width narrows.
 
 Usage:
     python3 tools/mdi_impedance.py            # print design + tolerance table
@@ -54,20 +64,30 @@ ETA0 = 376.730313668        # ohm
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Stackup:
-    name: str = "JLC04161H-7628"
+    name: str = "JLC04161H-2313"
     t_outer: float = 0.035
     t_inner: float = 0.0152
-    h_pp: float = 0.2104            # prepreg L1-L2 and L3-L4
-    er_pp: float = 4.4
-    h_core: float = 1.065
+    h_pp: float = 0.1000            # prepreg L1-L2 and L3-L4: 1x 2313, RC 57 %
+    er_pp: float = 4.05
+    pp_material: str = "2313"
+    h_core: float = 1.265
     er_core: float = 4.6
+    core_material: str = "FR4"
     t_mask: float = 0.010
     er_mask: float = 3.8
     tan_d: float = 0.02
 
     @property
     def total(self) -> float:
+        """Copper + dielectric thickness, outer copper surface to outer copper surface (mm)."""
         return 2 * self.t_outer + 2 * self.t_inner + 2 * self.h_pp + self.h_core
+
+    @property
+    def via_len(self) -> float:
+        """F.Cu -> B.Cu via barrel length exactly as KiCad 8 counts it in net length
+        with use_height_for_length_calcs (one outer copper + both prepregs + both inner
+        coppers + core).  7628: 1.5512 mm; 2313: 1.5304 mm."""
+        return round(self.t_outer + 2 * self.h_pp + 2 * self.t_inner + self.h_core, 4)
 
 
 STACKUP = Stackup()
@@ -77,13 +97,13 @@ STACKUP = Stackup()
 # ---------------------------------------------------------------------------
 Z_DIFF_TARGET = 100.0             # IEEE 802.3 clause 40 MDI, 100 ohm +/-15 % cable
 Z_DIFF_TOL = 0.10                 # board budget +/-10 %
-MDI_W = 0.165                     # trace width (mm)       } FD-solved for 100 ohm
-MDI_S = 0.125                     # edge-to-edge gap (mm)  } on L4 over L3 GND
-MDI_PAIR_PITCH = MDI_W + MDI_S    # P/N centreline spacing
-MDI_CLEARANCE = 0.30              # to any other net (>= 2*W, ~1.4 h) - DRU enforced
-MDI_INTERPAIR = 0.80              # pair-to-pair edge spacing (>= 0.76 mm / 30 mil, ~3.8 h)
+MDI_PAIR_PITCH = 0.290           # P/N centreline spacing - FROZEN since Rev 9 (all routing keys off it)
+MDI_W = 0.125                     # trace width (mm)  } Rev 19: FD-solved for 100 ohm at the frozen pitch
+MDI_S = round(MDI_PAIR_PITCH - MDI_W, 4)  # 0.165 } on JLC04161H-2313 (solve_w_pitch(0.29) -> 99.7 ohm)
+MDI_CLEARANCE = 0.30              # to any other net (>= 2*W, 3 h) - DRU enforced
+MDI_INTERPAIR = 0.80              # pair-to-pair edge spacing (>= 0.76 mm / 30 mil, 8 h)
 MDI_MAX_UNCOUPLED = 10.0          # mm per net: fan-outs, T568 3/6 split, via twists, skew trombones.
-                                  # An uncoupled 0.165 mm line is ~2 x 70.8 ohm; 10 mm = 55 ps, i.e. a
+                                  # An uncoupled 0.125 mm line on 2313 is ~2 x 57 ohm; 10 mm = 55 ps, i.e. a
                                   # return-loss contribution < -30 dB at 100 MHz (verified per net).
 MDI_INTRA_SKEW_MAX = 0.15         # mm  (~1 ps on FR4; 802.3 budget is far looser)
 MDI_MAX_LEN = 50.0                # mm  PHY-module pin to RJ45 contact, per side
@@ -308,6 +328,23 @@ def solve_w(s: float, target=Z_DIFF_TARGET, su=STACKUP, lo=0.08, hi=0.30, dx=0.0
     return lo if abs(f(lo)) < abs(f(hi)) else hi
 
 
+def solve_w_pitch(pitch: float = MDI_PAIR_PITCH, target=Z_DIFF_TARGET, su=STACKUP,
+                  lo=0.08, hi=0.25, dx=0.005) -> float:
+    """Solve W for `target` Zdiff with the CENTRELINE pitch held (S = pitch - W).
+    Used by Rev 19 to re-target existing routing to a new stackup without moving
+    a single centreline.  Zdiff falls monotonically with W at fixed pitch."""
+    f = lambda w: fd_coupled(w, pitch - w, su.h_pp, su.t_outer, su.er_pp, su.t_mask, su.er_mask, dx=dx)["zdiff"] - target
+    for _ in range(14):
+        mid = round((lo + hi) / 2 / dx) * dx
+        if f(mid) > 0:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= dx + 1e-9:
+            break
+    return lo if abs(f(lo)) < abs(f(hi)) else hi
+
+
 def tolerance_corners(w=MDI_W, s=MDI_S, su=STACKUP) -> list[dict]:
     """Fab corners, FD solver with mask: etch +/-0.02 mm on W (the gap moves
     the opposite way, pitch fixed), prepreg thickness +/-10 %, er +/-0.2.
@@ -354,6 +391,9 @@ def main() -> int:
     print(f"Stackup {su.name}: total {su.total:.4f} mm, PP {su.h_pp} mm er {su.er_pp}, "
           f"Cu {su.t_outer} mm, mask {su.t_mask} mm er {su.er_mask}")
     if a.solve:
+        w = solve_w_pitch()
+        r = fd_coupled(w, MDI_PAIR_PITCH - w, su.h_pp, su.t_outer, su.er_pp, su.t_mask, su.er_mask)
+        print(f"  pitch {MDI_PAIR_PITCH:.3f} held  ->  W={w:.3f} S={MDI_PAIR_PITCH - w:.3f}  Zdiff(FD)={r['zdiff']:.2f}")
         for s in (0.100, 0.125, 0.150, 0.200):
             w = solve_w(s)
             r = fd_coupled(w, s, su.h_pp, su.t_outer, su.er_pp, su.t_mask, su.er_mask)

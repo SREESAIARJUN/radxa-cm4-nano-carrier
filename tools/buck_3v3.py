@@ -49,7 +49,7 @@ Primary sources
 [D3] Samsung CL21A226MAQNNNE (LCSC C45783, JLC basic): 22 uF 25 V X5R 0805.
 [D4] onsemi MAX809STRG (LCSC C9965): SOT-23 1 GND / 2 RESET# / 3 VCC, push-pull active-low,
      Vth 2.93 V (2.85..3.00 V over temperature), tRP >= 140 ms, RESET# valid down to VCC 1.0 V.
-[S]  Stackup from tools/mdi_impedance.py: JLC04161H-7628, L4-L3 prepreg 0.2104 mm.
+[S]  Stackup from tools/mdi_impedance.py: JLC04161H-2313 (Rev 19), L4-L3 prepreg 0.100 mm.
 
 Enable / sequencing: EN = U6 RESET# (monitors the module's +3V3_OUT) -> R42 10k -> EN,
 R43 1M to GND. A plain 10k/1M from +3V3_OUT was rejected in review: SY8089 EN is only
@@ -989,7 +989,7 @@ def cmd_verify(a) -> int:
     h = STACKUP.h_pp + STACKUP.t_outer
     per = lambda pts: sum(math.dist(p, q) for p, q in zip(pts, pts[1:] + pts[:1]))
     # Loop inductance estimate: plan-view flux (mu0 * A / w_eff) is an UPPER bound for
-    # the outer-layer part; return in L3 at h = 0.245 mm below adds mu0*h*len/w.
+    # the outer-layer part; return in the L3 GND partition at h = h_pp + t_cu (0.135 mm on 2313) adds mu0*h*len/w.
     w_eff = 0.6
     l_hf = MU0 * (a_hf * 1e-6) / (w_eff * 1e-3) * 0.5 + MU0 * h * 1e-3 * per(hf) / 2 * 1e-3 / (w_eff * 1e-3) \
         + 2 * MU0 / (2 * math.pi) * h * 1e-3 * (math.log(4 * h / VIA_D) + 1 if 4 * h > VIA_D else 0.3)

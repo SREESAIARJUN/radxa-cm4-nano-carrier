@@ -1,0 +1,184 @@
+{
+  "rev": "18.0",
+  "leds": {
+    "R52": {
+      "colour": "green",
+      "driver": "+3V3_OUT (always on with module 3V3)",
+      "R": 330.0,
+      "I_min_mA": 0.855,
+      "I_typ_mA": 2.273,
+      "I_max_mA": 3.566,
+      "Iv_typ_mcd": 85.2
+    },
+    "R53": {
+      "colour": "red",
+      "driver": "nPI_LED_PWR",
+      "R": 1000.0,
+      "I_min_mA": 0.975,
+      "I_typ_mA": 1.35,
+      "I_max_mA": 1.833,
+      "Iv_typ_mcd": 12.1
+    },
+    "R54": {
+      "colour": "red",
+      "driver": "PI_nLED_Activity",
+      "R": 1000.0,
+      "I_min_mA": 0.975,
+      "I_typ_mA": 1.35,
+      "I_max_mA": 1.833,
+      "Iv_typ_mcd": 12.1
+    },
+    "R55": {
+      "colour": "green",
+      "driver": "Ethernet_nLED1",
+      "R": 330.0,
+      "I_min_mA": 0.555,
+      "I_typ_mA": 1.97,
+      "I_max_mA": 3.566,
+      "Iv_typ_mcd": 73.9
+    }
+  },
+  "buttons": {
+    "VIO_1.8": {
+      "V_low_worst": 0.317,
+      "VIL": 0.54
+    },
+    "VIO_3.3": {
+      "V_low_worst": 0.581,
+      "VIL": 0.8
+    }
+  },
+  "R_btn": 470.0,
+  "Rpu_range": [
+    2200.0,
+    100000.0
+  ],
+  "checks": [
+    {
+      "check": "R52 green LED current >= 0.25 mA at worst corner (visible indoors)",
+      "pass": true,
+      "detail": "0.86 / 2.27 / 3.57 mA, ~85 mcd typ"
+    },
+    {
+      "check": "R52 LED current <= IF max 20 mA",
+      "pass": true,
+      "detail": "3.57 mA"
+    },
+    {
+      "check": "R52 dissipation << 0402 rating",
+      "pass": true,
+      "detail": "4.15 mW"
+    },
+    {
+      "check": "R53 red LED current >= 0.25 mA at worst corner (visible indoors)",
+      "pass": true,
+      "detail": "0.98 / 1.35 / 1.83 mA, ~12 mcd typ"
+    },
+    {
+      "check": "R53 LED current <= IF max 20 mA",
+      "pass": true,
+      "detail": "1.83 mA"
+    },
+    {
+      "check": "R53 module pin sink <= 4 mA",
+      "pass": true,
+      "detail": "1.83 mA"
+    },
+    {
+      "check": "R53 dissipation << 0402 rating",
+      "pass": true,
+      "detail": "3.33 mW"
+    },
+    {
+      "check": "R54 red LED current >= 0.25 mA at worst corner (visible indoors)",
+      "pass": true,
+      "detail": "0.98 / 1.35 / 1.83 mA, ~12 mcd typ"
+    },
+    {
+      "check": "R54 LED current <= IF max 20 mA",
+      "pass": true,
+      "detail": "1.83 mA"
+    },
+    {
+      "check": "R54 module pin sink <= 4 mA",
+      "pass": true,
+      "detail": "1.83 mA"
+    },
+    {
+      "check": "R54 dissipation << 0402 rating",
+      "pass": true,
+      "detail": "3.33 mW"
+    },
+    {
+      "check": "R55 green LED current >= 0.25 mA at worst corner (visible indoors)",
+      "pass": true,
+      "detail": "0.56 / 1.97 / 3.57 mA, ~74 mcd typ"
+    },
+    {
+      "check": "R55 LED current <= IF max 20 mA",
+      "pass": true,
+      "detail": "3.57 mA"
+    },
+    {
+      "check": "R55 module pin sink <= 4 mA",
+      "pass": true,
+      "detail": "3.57 mA"
+    },
+    {
+      "check": "R55 dissipation << 0402 rating",
+      "pass": true,
+      "detail": "4.15 mW"
+    },
+    {
+      "check": "R53 red: injection into a 1V8 pin held HIGH <= 0.5 mA (no latch-up / rail pump)",
+      "pass": true,
+      "detail": "217 uA (faint glow possible)"
+    },
+    {
+      "check": "R54 red: injection into a 1V8 pin held HIGH <= 0.5 mA (no latch-up / rail pump)",
+      "pass": true,
+      "detail": "217 uA (faint glow possible)"
+    },
+    {
+      "check": "R55 green: injection into a 1V8 pin held HIGH <= 0.5 mA (no latch-up / rail pump)",
+      "pass": true,
+      "detail": "0 uA (die stays off)"
+    },
+    {
+      "check": "Button low level at VIO 1.8 V, Rpu >= 2.2 k: V <= VIL - 0.15 V margin",
+      "pass": true,
+      "detail": "0.317 V vs VIL 0.54 V"
+    },
+    {
+      "check": "Button low level at VIO 3.3 V, Rpu >= 2.2 k: V <= VIL - 0.15 V margin",
+      "pass": true,
+      "detail": "0.581 V vs VIL 0.80 V"
+    },
+    {
+      "check": "Button pressed against a push-pull HIGH pin: current <= switch 50 mA and <= 8 mA GPIO",
+      "pass": true,
+      "detail": "7.37 mA"
+    },
+    {
+      "check": "Series-R pulse power (pin driven high, button held) <= 0402 rating",
+      "pass": true,
+      "detail": "25.5 mW"
+    },
+    {
+      "check": "ESD VRWM >= 3V3 rail max + 10 %",
+      "pass": true,
+      "detail": "5.0 V vs 3.81 V"
+    },
+    {
+      "check": "Switch voltage rating >= 3V3 max",
+      "pass": true,
+      "detail": "12.0 V"
+    },
+    {
+      "check": "Series R x node C << 1 us (no effect on reset/boot strap timing)",
+      "pass": true,
+      "detail": "tau 0.71 ns"
+    }
+  ],
+  "pass": true
+}

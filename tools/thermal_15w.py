@@ -590,8 +590,8 @@ def board_k_inplane(t_cu_total: float, t_board: float) -> float:
 
 MOD_T = 1.2e-3                       # module PCB thickness (CM4 class), 6-8 layer, ~4 oz total Cu (assumed)
 MOD_K_IN = board_k_inplane(4 * 0.035e-3, MOD_T)
-CAR_T = STACKUP.total
-CAR_K_IN = board_k_inplane(2 * STACKUP.t_outer + 2 * STACKUP.t_inner, CAR_T)
+CAR_T = STACKUP.total * 1e-3          # m.  Rev 19 fix: STACKUP is in mm (was used as metres -> 1000x)
+CAR_K_IN = board_k_inplane((2 * STACKUP.t_outer + 2 * STACKUP.t_inner) * 1e-3, CAR_T)
 A_BOARD = BOARD_W * BOARD_H * 1e-6
 STACK_H = STACK[SELECTED_RECEPTACLE]["stack"] * 1e-3
 
