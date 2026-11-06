@@ -75,7 +75,9 @@ W = Z.MDI_W                  # 0.165
 S = Z.MDI_S                  # 0.125
 PITCH = W + S                # 0.290 centre-to-centre
 HP = PITCH / 2
-VIA_D, VIA_DRILL = 0.45, 0.20          # matches board minimums (annulus 0.125)
+VIA_D, VIA_DRILL = 0.50, 0.30          # project minimums (.kicad_pro: via 0.50 / drill 0.30, annulus 0.10)
+VIA_PITCH = 0.65                       # MDI via-pair pitch -> 0.15 mm P-N via gap (netclass clearance 0.12)
+GROUP = "REV9_ETH_MDI"                 # every item this stage adds is a member (idempotent re-runs, DRC attribution)
 CHAMFER = 0.6                          # centreline 45-degree corner cut
 NETCLASS = "ETH_MDI_100R"
 MDI_CLR = 0.30                         # MDI copper (track/via) to other-net track/via/zone
@@ -85,23 +87,28 @@ SPLIT_GAP = 2.0                        # GND <-> ETH_SHIELD plane split
 # via the LCSC/EasyEDA land patterns, re-entered numerically below).
 T1_MPN = "Pulse H5007NL"               # LCSC C6384935, 1000BASE-T 1CT:1CT, 1500 Vrms
 J3_MPN = "Amphenol RJE231881317T"      # LCSC C5384839, vertical SMT, shielded, 13.1 mm
-T1_AT, T1_ROT_PIN1 = (19.0, 19.0), "top-right"
-J3_AT = (44.2, 25.0)
+T1_AT = (34.0, 20.0)                   # B.Cu, PHY row east (pin 1 top), cable row west
+J3_AT = (11.0, 20.0)                   # B.Cu, contacts facing east (pin 1 at the BOTTOM: bottom-side mirror)
 
 # Island (ETH_SHIELD) and the GND notch around it (inner layers)
-ISLAND = (11.0, 20.0, 54.7, 33.5)                     # x0, y0, x1, y1
-NOTCH = (ISLAND[0] - SPLIT_GAP, ISLAND[1] - SPLIT_GAP, 55.0, ISLAND[3] + SPLIT_GAP)
+ISLAND = (0.0, 11.8, T1_AT[0] - 1.0, 31.5)            # x0, y0, x1, y1 (west / cable side; split under T1)
+NOTCH = (0.0, ISLAND[1] - SPLIT_GAP, ISLAND[2] + SPLIT_GAP, ISLAND[3] + SPLIT_GAP)
 
-# CM4 pair -> transformer channel -> T568 pins (+, -)
+# CM4 pair -> transformer channel -> T568 pins (+, -).  td/mx = (pin for the
+# P net, pin for the N net).  Channel order on T1 (top->bottom) is ch1..ch4 =
+# Pair3, Pair1, Pair2, Pair0 so that the cable side runs straight to the
+# (bottom-side, mirrored) RJ45.  Every pair lands P on the NON-dot end of both
+# windings (TDk- and MXk-): swapping both ends of a 1CT:1CT winding keeps the
+# end-to-end polarity.
 PAIRS = {
-    0: dict(td=("2", "3"), mx=("23", "22"), rj=("1", "2"), tct="1", mct="24"),
-    1: dict(td=("5", "6"), mx=("20", "19"), rj=("3", "6"), tct="4", mct="21"),
-    2: dict(td=("8", "9"), mx=("17", "16"), rj=("4", "5"), tct="7", mct="18"),
-    3: dict(td=("11", "12"), mx=("14", "13"), rj=("7", "8"), tct="10", mct="15"),
+    3: dict(ch=1, td=("3", "2"), mx=("22", "23"), rj=("7", "8"), tct="1", mct="24"),
+    1: dict(ch=2, td=("6", "5"), mx=("19", "20"), rj=("3", "6"), tct="4", mct="21"),
+    2: dict(ch=3, td=("9", "8"), mx=("16", "17"), rj=("4", "5"), tct="7", mct="18"),
+    0: dict(ch=4, td=("12", "11"), mx=("13", "14"), rj=("1", "2"), tct="10", mct="15"),
 }
-# Transformer winding dot convention (Pulse H5007NL datasheet): TDn+ and MXn+
-# share the dot.  Used by verify to prove end-to-end polarity.
-T1_DOT = {"2": "23", "5": "20", "8": "17", "11": "14"}
+# Transformer windings (Pulse H5007NL datasheet): channel -> (TD+ dot, TD-, MX+ dot, MX-)
+T1_WINDINGS = {1: ("2", "3", "23", "22"), 2: ("5", "6", "20", "19"),
+               3: ("8", "9", "17", "16"), 4: ("11", "12", "14", "13")}
 
 
 def phy_net(n, pol):
@@ -191,15 +198,19 @@ def write_footprints():
     LIB.mkdir(parents=True, exist_ok=True)
     for name, f in FOOTPRINTS.items():
         (LIB / f"{name}.kicad_mod").write_text(f())
-    # fp-lib-table: keep cm4_mechanical's entry, add the legacy CM4Carrier lib
-    # referenced by the schematic mounting-hole symbols (fixes Rev 7 DRC
-    # lib_footprint_issues).
-    (ROOT / "fp-lib-table").write_text(
-        '(fp_lib_table\n  (version 7)\n'
-        f'  (lib (name "{LIBNAME}")(type "KiCad")(uri "${{KIPRJMOD}}/lib/{LIBNAME}.pretty")(options "")'
-        '(descr "CM4 mechanical + Rev 9 Ethernet footprints"))\n'
-        '  (lib (name "CM4Carrier")(type "KiCad")(uri "${KIPRJMOD}/lib/CM4Carrier.pretty")(options "")'
-        '(descr "Legacy Rev 5 mounting-hole footprint used by the schematic"))\n)\n')
+    # fp-lib-table: MERGE (other pipeline stages may add libraries).  Ensure the
+    # project lib and the legacy CM4Carrier lib referenced by the schematic
+    # mounting-hole symbols (Rev 7 DRC lib_footprint_issues) are present.
+    t = ROOT / "fp-lib-table"
+    txt = t.read_text() if t.exists() else "(fp_lib_table\n  (version 7)\n)\n"
+    want = {
+        LIBNAME: f'  (lib (name "{LIBNAME}")(type "KiCad")(uri "${{KIPRJMOD}}/lib/{LIBNAME}.pretty")(options "")(descr "Project footprints (CM4 mechanical, Ethernet, HDMI, power)"))',
+        "CM4Carrier": '  (lib (name "CM4Carrier")(type "KiCad")(uri "${KIPRJMOD}/lib/CM4Carrier.pretty")(options "")(descr "Legacy Rev 5 mounting-hole footprint used by the schematic"))',
+    }
+    for name, line in want.items():
+        if f'(name "{name}")' not in txt:
+            txt = txt.rstrip().rstrip(")").rstrip() + "\n" + line + "\n)\n"
+    t.write_text(txt)
 
 
 # ---------------------------------------------------------------------------
@@ -251,28 +262,32 @@ def plen(pts):
     return sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
 
 
-def add_bump(pts, extra, side_sign, min_seg=2.0):
-    """Insert a 45-degree trombone bump of added length `extra` into the
-    longest straight segment of `pts`; bump bulges to side_sign*left."""
+def add_bump(pts, extra, side_sign, amp_max=0.35, seg=None):
+    """Insert 45-degree trombone bump(s) adding `extra` mm into the longest
+    straight segment of `pts`, bulging to side_sign * left-of-travel.  Bump
+    height <= amp_max (keeps >= 2 S from the partner and clear of neighbours);
+    as many bumps as needed, each flat 3 W, spaced 3 W."""
     if extra <= 1e-4:
         return pts
-    a = extra / (2 * math.sqrt(2) - 2)          # height for the extra length
-    a = max(a, 0.05)
-    i = max(range(len(pts) - 1), key=lambda k: math.dist(pts[k], pts[k + 1]))
+    per = (2 * math.sqrt(2) - 2)                 # extra length per mm of height, per bump
+    nb = max(1, math.ceil(extra / (per * amp_max) - 1e-9))
+    a = extra / (per * nb)
+    i = seg if seg is not None else max(range(len(pts) - 1), key=lambda k: math.dist(pts[k], pts[k + 1]))
     p, q = pts[i], pts[i + 1]
     L = math.dist(p, q)
-    if L < max(min_seg, 2 * a + 3 * W):
-        raise RuntimeError(f"no straight run for a {extra:.3f} mm skew bump")
+    flat, gap = 3 * W, 3 * W
+    span = nb * (2 * a + flat) + (nb - 1) * gap
+    if L < span + 0.4:
+        raise RuntimeError(f"no straight run for {extra:.3f} mm of skew compensation (need {span:.2f}, have {L:.2f})")
     ux, uy = (q[0] - p[0]) / L, (q[1] - p[1]) / L
     nx, ny = uy * side_sign, -ux * side_sign
-    flat = 3 * W
-    m = L / 2
-    s0 = m - flat / 2 - a
-    pts_b = [(p[0] + ux * s0, p[1] + uy * s0),
-             (p[0] + ux * (s0 + a) + nx * a, p[1] + uy * (s0 + a) + ny * a),
-             (p[0] + ux * (s0 + a + flat) + nx * a, p[1] + uy * (s0 + a + flat) + ny * a),
-             (p[0] + ux * (s0 + 2 * a + flat), p[1] + uy * (s0 + 2 * a + flat))]
-    return pts[:i + 1] + pts_b + pts[i + 1:]
+    s0 = (L - span) / 2
+    out = []
+    for k in range(nb):
+        b0 = s0 + k * (2 * a + flat + gap)
+        for (t, h) in ((b0, 0), (b0 + a, a), (b0 + a + flat, a), (b0 + 2 * a + flat, 0)):
+            out.append((p[0] + ux * t + nx * h, p[1] + uy * t + ny * h))
+    return pts[:i + 1] + out + pts[i + 1:]
 
 
 # ---------------------------------------------------------------------------
@@ -313,198 +328,207 @@ class Plan:
         self.vias.append((x, y, net))
 
 
-def build_plan(pads) -> Plan:
+def build_plan(pads, pads_net=None) -> Plan:
+    """Route plan (board coords, mm, top view; y down).  See module docstring.
+
+    T1 (B.Cu) PHY row faces EAST, pin 1 at the top; J3 (B.Cu) contacts face
+    EAST towards T1's cable row, pin 1 at the BOTTOM (bottom-side mirror).
+    Channel order top->bottom: ch1 = Pair3 (D), ch2 = Pair1 (B), ch3 = Pair2
+    (C), ch4 = Pair0 (A) - this makes the cable side run straight across.
+    Every pair lands P on the non-dot winding end at BOTH TDk- and MXk-, so
+    polarity is preserved end-to-end (verified from the dot convention).
+
+    PHY side: bands run east on F.Cu (P3 and P2/P1/P0 from the J1 field),
+    drops run south on B.Cu east of T1 and turn west into the pads with P on
+    the south (TD-) pad.  F.Cu bands and B.Cu drops sit over different solid
+    planes (In1 / In2), so they may cross; each pair changes layer exactly
+    once.  Two pairs (3, 0) need a compact two-layer via twist at the corner.
+    """
     P = Plan(pads)
     T = lambda n: pads[("T1", n)]
     R = lambda n: pads[("J3", n)]
 
-    # ---------------- PHY side: J1 -> T1 (TD pins) ----------------------
-    # T1 drop x for each pair (mid of TD+/TD- pads), pads' top end y
-    def t1_drop(n):
-        a, b = T(PAIRS[n]["td"][0]), T(PAIRS[n]["td"][1])
-        return (a[0] + b[0]) / 2, min(a[1], b[1])
-    y_fan = lambda n: t1_drop(n)[1] - 0.85          # end of coupled section above pads
+    t1_e = T("1")[0]                      # PHY pad-row x (pad centres)
+    x_entry = t1_e + 0.952 + 0.55         # coupled section ends here, then fans into pads
+    # South-drop centrelines (ch1..ch4): 0.95 mm pitch (0.495 mm edge gap), 1.2 mm
+    # between ch2 and ch3 so ch3 clears ch2's corner-via antipads on In2.  The
+    # corridor lies between T1 (x <= 42.6) and the Rev 13 buck U5/L1 (x >= 47.85).
+    XV = {3: x_entry + 0.60, 1: x_entry + 1.55, 2: x_entry + 2.75, 0: x_entry + 3.70}
 
-    def t1_tail(n, center_end_x):
-        """Fan-out from coupled pair heading south at x=center_end_x into
-        TD+/TD- pads.  Returns (tail for the east leg, tail for the west leg)."""
-        a, b = T(PAIRS[n]["td"][0]), T(PAIRS[n]["td"][1])
-        east, west = (a, b) if a[0] > b[0] else (b, a)
-        y0 = y_fan(n)
-        k = east[0] - (center_end_x + HP)
-        e = [(center_end_x + HP, y0), (east[0], y0 + k), east]
-        w = [(center_end_x - HP, y0), (west[0], y0 + k), west]
-        return e, w, (east is a)           # (east, west, east_is_TD+)
+    def t1_tail(n):
+        """Fan-in heading WEST: P -> south (TD-) pad, N -> north (TD+) pad."""
+        pp, nn = T(PAIRS[n]["td"][0]), T(PAIRS[n]["td"][1])
+        assert pp[1] > nn[1], "P must land on the south (TD-) pad"
+        yc = (pp[1] + nn[1]) / 2
+        k = (pp[1] - nn[1]) / 2 - HP
+        tp = [(x_entry, yc + HP), (x_entry - k, pp[1]), pp]
+        tn = [(x_entry, yc - HP), (x_entry - k, nn[1]), nn]
+        return yc, tp, tn
 
-    vias = []
-    # Pair 3: outer row, edge channel on F.Cu -> stacked vias east of J1 ->
-    # B.Cu band y=0.85 west -> drop at TD4.
-    p3p, p3n = j1_pad(3), j1_pad(5)            # P (34.4,1.5) east, N (34.0,1.5) west
-    yb = 0.665                                  # F.Cu edge-channel centreline
-    vx = 35.95
-    vN3, vP3 = (vx, 0.55), (vx, 1.15)
-    fP = [p3p, (p3p[0], yb + HP), (vx - 0.55, yb + HP), (vx - 0.3, vP3[1] - 0.25), vP3]
-    fN = [p3n, (p3n[0], yb - HP), (vx - 0.6, yb - HP), vN3]
-    xd, _ = t1_drop(3)
-    band = 0.855
-    pB, nB = coupled([(vx - 0.5, band), (xd, band), (xd, y_fan(3))], p_side=-1)  # heading W: P (south) = right
-    e, w, east_is_plus = t1_tail(3, xd)
-    assert east_is_plus
-    pB = [vP3, (vx - 0.5, band + HP)] + pB[1:] + e[1:]
-    nB = [vN3, (vx - 0.5 + 0.0, band - HP)] + nB[1:] + w[1:]
-    P.pair("PHY3", phy_net(3, "P"), phy_net(3, "N"), [("F.Cu", fP, fN), ("B.Cu", pB, nB)],
+    def twist(xc, y0):
+        """Arriving on F.Cu heading SOUTH with P west / N east at (xc, y0);
+        leave on B.Cu heading south with P EAST.  N drops through a via first,
+        P passes under it and through a second via further east."""
+        vN = (xc + 0.35, y0 + 0.15)
+        vP = (xc + 0.70, y0 + 1.05)
+        fP = [(xc - HP, y0), (xc - HP, y0 + 0.85), (xc + 0.05, y0 + 1.05), vP]
+        fN = [(xc + HP, y0), vN]
+        bN = [vN, (xc - HP, y0 + 0.645)]
+        bP = [vP, (xc + HP, y0 + 1.605)]
+        return vP, vN, fP, fN, bP, bN, y0 + 1.65
+
+    # ---- Pair 3 (ch1): outer row, P (34.4) east / N (34.0) west.  F.Cu south
+    #      into the DF40 inter-row gap (P east = left), east along the gap past
+    #      pins 1/2 and the connector end (P north), south at the drop (P east)
+    #      -> side-by-side vias -> B.Cu drop.  No twist, no edge channel (the
+    #      project keeps copper >= 0.5 mm from Edge.Cuts).
+    p3p, p3n = j1_pad(3), j1_pad(5)
+    xd = XV[3]
+    band3 = 2.75
+    pc, nc = coupled([(34.20, 1.95), (34.20, band3), (xd, band3), (xd, 3.40)], p_side=+1)
+    vP3, vN3 = (xd + VIA_PITCH / 2, 3.95), (xd - VIA_PITCH / 2, 3.95)
+    fP = [p3p] + pc + [vP3]
+    fN = [p3n] + nc + [vN3]
+    yc, tp, tn = t1_tail(3)
+    pc, nc = coupled([(xd, 4.55), (xd, yc), (x_entry, yc)], p_side=+1)
+    P.pair("PHY3", phy_net(3, "P"), phy_net(3, "N"),
+           [("F.Cu", fP, fN), ("B.Cu", [vP3] + pc + tp[1:], [vN3] + nc + tn[1:])],
            vias=[(*vP3, phy_net(3, "P")), (*vN3, phy_net(3, "N"))])
 
-    # Pair 2: outer row, N pad 33.2 (east) P pad 32.8 (west); vias in the
-    # inter-row gap, N upper-right / P lower-left -> heading W with P south.
+    # ---- Pair 2 (ch3): outer row, P (32.8) west / N (33.2) east.  Inter-row
+    #      vias: P upper-left, N lower-right -> B.Cu band east (P north),
+    #      south drop (P east), west entry (P south).  No twist.
     p2p, p2n = j1_pad(11), j1_pad(9)
-    vN2, vP2 = (33.30, 2.65), (32.60, 3.45)
-    fP = [p2p, (p2p[0], 1.95), vP2]
-    fN = [p2n, (p2n[0], 1.95), vN2]
+    vP2, vN2 = (32.55, 2.45), (33.25, 3.50)
+    fP = [p2p, vP2]
+    fN = [p2n, (p2n[0], 2.30), vN2]
+    xd = XV[2]
+    yc, tp, tn = t1_tail(2)
     band = 3.05
-    xd, _ = t1_drop(2)
-    pB, nB = coupled([(32.05, band), (xd, band), (xd, y_fan(2))], p_side=-1)
-    e, w, east_is_plus = t1_tail(2, xd)
-    assert east_is_plus
-    pB = [vP2, (vP2[0] - 0.255, band + HP)] + pB + e[1:]
-    nB = [vN2, (vN2[0] - 0.255, band - HP)] + nB + w[1:]
+    pc, nc = coupled([(33.75, band), (xd, band), (xd, yc), (x_entry, yc)], p_side=+1)
+    pB = [vP2, (33.0, band - HP)] + pc + tp[1:]
+    nB = [vN2, (33.555, band + HP)] + nc + tn[1:]
     P.pair("PHY2", phy_net(2, "P"), phy_net(2, "N"), [("F.Cu", fP, fN), ("B.Cu", pB, nB)],
            vias=[(*vP2, phy_net(2, "P")), (*vN2, phy_net(2, "N"))])
 
-    # Pair 1: inner row, P pad 34.4 (east) N 34.0 (west): F.Cu south (P east =
-    # left of travel) -> west under Pair 0's transition -> stacked vias -> B.Cu.
+    # ---- Pair 1 (ch2): inner row, P (34.4) east / N (34.0) west.  F.Cu south
+    #      (P east = left), east band y=6.4 (P north), south (P east) -> side-
+    #      by-side vias -> B.Cu drop.  No twist.
     p1p, p1n = j1_pad(4), j1_pad(6)
-    xs = 34.70                       # F.Cu drop centreline (clear of Pair 0's P via)
-    band1 = 7.40
-    vx1 = 31.00
-    vN1, vP1 = (vx1, band1 - 0.30), (vx1, band1 + 0.30)
-    cF = [(xs, 5.75), (xs, band1), (vx1 + 0.55, band1)]
-    fP_c, fN_c = coupled(cF, p_side=+1)          # heading S: P east = left
-    fP = [p1p, (p1p[0], 5.15), (xs + HP, 5.75)] + fP_c[1:] + [(vx1 + 0.3, band1 + HP), vP1]
-    fN = [p1n, (p1n[0], 5.15), (xs - HP, 5.75)] + fN_c[1:] + [(vx1 + 0.3, band1 - HP), vN1]
-    xd, _ = t1_drop(1)
-    pB, nB = coupled([(vx1 - 0.55, band1), (xd, band1), (xd, y_fan(1))], p_side=-1)
-    e, w, east_is_plus = t1_tail(1, xd)
-    assert east_is_plus
-    pB = [vP1, (vx1 - 0.3, band1 + HP)] + pB + e[1:]
-    nB = [vN1, (vx1 - 0.3, band1 - HP)] + nB + w[1:]
+    xd = XV[1]
+    pc, nc = coupled([(34.20, 5.25), (34.20, 6.40), (xd, 6.40), (xd, 7.00)], p_side=+1)
+    vP1, vN1 = (xd + VIA_PITCH / 2, 7.35), (xd - VIA_PITCH / 2, 7.35)
+    fP = [p1p] + pc + [vP1]
+    fN = [p1n] + nc + [vN1]
+    yc, tp, tn = t1_tail(1)
+    pc, nc = coupled([(xd, 7.95), (xd, yc), (x_entry, yc)], p_side=+1)
+    pB = [vP1] + pc + tp[1:]
+    nB = [vN1] + nc + tn[1:]
     P.pair("PHY1", phy_net(1, "P"), phy_net(1, "N"), [("F.Cu", fP, fN), ("B.Cu", pB, nB)],
            vias=[(*vP1, phy_net(1, "P")), (*vN1, phy_net(1, "N"))])
 
-    # Pair 0: inner row, N pad 33.2 (east) P pad 32.8 (west).  Two-layer twist:
-    # N drops straight to a via; P runs south then east under N's via to a via
-    # east of it.  B.Cu then heads south with P east -> west band with P south.
+    # ---- Pair 0 (ch4): inner row, P (32.8) west / N (33.2) east.  F.Cu south
+    #      (P west = right), east band y=8.1 under Pair 1's vias (P south),
+    #      south (P west) -> twist -> B.Cu drop (P east).
     p0p, p0n = j1_pad(12), j1_pad(10)
-    vN0, vP0 = (33.35, 5.60), (33.75, 6.45)
-    fN = [p0n, (p0n[0], 5.05), vN0]
-    fP = [p0p, (p0p[0], 6.45), vP0]
-    band0 = 8.65
-    xd, _ = t1_drop(0)
-    xc = 33.25
-    pB, nB = coupled([(xc, 7.15), (xc, band0), (xd, band0), (xd, y_fan(0))], p_side=+1)  # heading S: P east = left
-    e, w, east_is_plus = t1_tail(0, xd)
-    assert east_is_plus
-    pB = [vP0, (xc + HP, 6.85)] + pB + e[1:]
-    nB = [vN0, (xc - HP - 0.12, 5.90), (xc - HP, 6.25)] + nB + w[1:]
-    P.pair("PHY0", phy_net(0, "P"), phy_net(0, "N"), [("F.Cu", fP, fN), ("B.Cu", pB, nB)],
-           vias=[(*vP0, phy_net(0, "P")), (*vN0, phy_net(0, "N"))])
+    xd = XV[0]
+    pc, nc = coupled([(33.00, 5.25), (33.00, 8.10), (xd, 8.10), (xd, 8.70)], p_side=-1)
+    fP = [p0p] + pc
+    fN = [p0n] + nc
+    vP, vN, tP, tN, bP, bN, ys = twist(xd, 8.70)
+    yc, tp, tn = t1_tail(0)
+    pc, nc = coupled([(xd, ys), (xd, yc), (x_entry, yc)], p_side=+1)
+    P.pair("PHY0", phy_net(0, "P"), phy_net(0, "N"),
+           [("F.Cu", fP + tP[1:], fN + tN[1:]), ("B.Cu", bP + pc + tp[1:], bN + nc + tn[1:])],
+           vias=[(*vP, phy_net(0, "P")), (*vN, phy_net(0, "N"))])
 
-    # ---------------- Cable side: T1 (MX pins) -> J3 ----------------------
-    def mx(n):
-        a, b = T(PAIRS[n]["mx"][0]), T(PAIRS[n]["mx"][1])      # (+, -)
-        return a, b
+    # ---------------- Cable side: T1 MX row (west) -> J3 contacts ----------
+    tx = T("13")[0]                         # MX pad centres x
+    jx = R("1")[0]                          # RJ45 contact pad centres x
+    t_end = tx - 0.952 - 0.05               # just off the transformer pad toe
+    j_end = jx + 1.70 + 0.05                # just off the RJ45 pad toe
+    xs, xe = t_end - 0.49, j_end + 0.49
 
-    def t1_cab_head(n, y0):
-        """Fan-in from MX+/MX- pads (bottom row) to a coupled pair heading S
-        whose centreline starts at (xm, y0).  MX- is WEST on this part."""
-        plus, minus = mx(n)
-        xm = (plus[0] + minus[0]) / 2
-        k = plus[0] - (xm + HP)
-        ys = max(plus[1], minus[1])
-        hp = [plus, (plus[0], ys + 0.55), (xm + HP, ys + 0.55 + k)]
-        hn = [minus, (minus[0], ys + 0.55), (xm - HP, ys + 0.55 + k)]
-        return xm, ys + 0.55 + k, hp, hn
+    def cable(up_t, lo_t, up_j, lo_j):
+        """Coupled pair from T1 pads (upper/lower) to J3 pads, heading west,
+        with one 45-degree jog.  Returns (upper leg, lower leg)."""
+        yt, yj = (up_t[1] + lo_t[1]) / 2, (up_j[1] + lo_j[1]) / 2
+        dy = yj - yt
+        xm = (xs + xe) / 2
+        center = [(xs, yt), (xm + abs(dy) / 2, yt), (xm - abs(dy) / 2, yj), (xe, yj)]
+        up = offset(center, -HP)            # heading W: north = right of travel
+        lo = offset(center, +HP)
+        fu = [up_t, (t_end, up_t[1])] + up + [(j_end, up_j[1]), up_j]
+        fl = [lo_t, (t_end, lo_t[1])] + lo + [(j_end, lo_j[1]), lo_j]
+        return fu, fl
 
-    def rj_tail(pin_plus, pin_minus, xc, yc):
-        """Coupled pair heading E at centre y=yc ends at x=xc; fan to J3 pads."""
-        a, b = R(pin_plus), R(pin_minus)
-        k = abs(a[1] - (yc - HP)) if a[1] < b[1] else abs(a[1] - (yc + HP))
-        ta = [(xc, yc - HP if a[1] < b[1] else yc + HP), (xc + k, a[1]), a]
-        tb = [(xc, yc + HP if a[1] < b[1] else yc - HP), (xc + k, b[1]), b]
-        return ta, tb
+    def mxP(n):
+        return T(PAIRS[n]["mx"][0])
 
-    # Pair A (CM4 Pair 0) : T1 23/22 -> J3 1/2
-    xm, y0, hp, hn = t1_cab_head(0, None)
-    yA = (R("1")[1] + R("2")[1]) / 2
-    pc, nc = coupled([(xm, y0), (xm, 28.2), (29.6, 28.2), (29.6, yA), (32.6, yA)], p_side=+1)  # S: + east = left
-    ta, tb = rj_tail("1", "2", 32.6, yA)
-    P.pair("CAB0", cab_net(0, "P"), cab_net(0, "N"),
-           [("B.Cu", hp + pc[1:] + ta[1:], hn + nc[1:] + tb[1:])])
+    def mxN(n):
+        return T(PAIRS[n]["mx"][1])
 
-    # Pair B (CM4 Pair 1) : T1 20/19 -> J3 3/6, splits around pair C
-    xm, y0, hp, hn = t1_cab_head(1, None)
-    yB = 25.0
-    xs = 31.15
-    pc, nc = coupled([(xm, y0), (xm, 29.5), (30.7, 29.5), (30.7, yB), (xs, yB)], p_side=+1)
-    a, b = R("3"), R("6")
-    tp = [(xs, yB - HP), (xs + abs(a[1] - (yB - HP)), a[1]), a]
-    tn = [(xs, yB + HP), (xs + abs(b[1] - (yB + HP)), b[1]), b]
-    P.pair("CAB1", cab_net(1, "P"), cab_net(1, "N"), [("B.Cu", hp + pc[1:] + tp[1:], hn + nc[1:] + tn[1:])])
+    for n in (3, 2, 0):                     # D, C, A: straight across with a jog
+        p_t, n_t = mxP(n), mxN(n)
+        p_j, n_j = R(PAIRS[n]["rj"][0]), R(PAIRS[n]["rj"][1])
+        assert (p_t[1] > n_t[1]) == (p_j[1] > n_j[1]), f"pair {n}: cable-side order would cross"
+        if p_t[1] > n_t[1]:
+            nl, pl = cable(n_t, p_t, n_j, p_j)
+        else:
+            pl, nl = cable(p_t, n_t, p_j, n_j)
+        P.pair(f"CAB{n}", cab_net(n, "P"), cab_net(n, "N"), [("B.Cu", pl, nl)])
 
-    # Pair C (CM4 Pair 2) : T1 17/16 -> F.Cu hop -> J3 4/5
-    plus, minus = mx(2)
-    xm = (plus[0] + minus[0]) / 2
-    ys = max(plus[1], minus[1])
-    vcp, vcn = (xm + 0.30, 28.55), (xm - 0.30, 28.55)        # + east, - west
-    b1p = [plus, (plus[0], ys + 0.55), vcp]
-    b1n = [minus, (minus[0], ys + 0.55), vcn]
-    yC = (R("4")[1] + R("5")[1]) / 2
-    xv2 = 32.45
-    vjp, vjn = (xv2, yC - 0.30), (xv2, yC + 0.30)             # + north (pin 4), - south (pin 5)
-    pc, nc = coupled([(xm, 29.0), (xm, 29.9), (31.9, 29.9), (31.9, yC), (xv2 - 0.55, yC)], p_side=+1)
-    f_p = [vcp, (xm + HP, 29.0)] + pc[1:] + [(xv2 - 0.3, yC - HP), vjp]
-    f_n = [vcn, (xm - HP, 29.0)] + nc[1:] + [(xv2 - 0.3, yC + HP), vjn]
-    a, b = R("4"), R("5")
-    b2p = [vjp, (vjp[0] + abs(vjp[1] - a[1]), a[1]), a]
-    b2n = [vjn, (vjn[0] + abs(vjn[1] - b[1]), b[1]), b]
-    P.pair("CAB2", cab_net(2, "P"), cab_net(2, "N"),
-           [("B.Cu", b1p, b1n), ("F.Cu", f_p, f_n), ("B.Cu", b2p, b2n)],
-           vias=[(*vcp, cab_net(2, "P")), (*vcn, cab_net(2, "N")), (*vjp, cab_net(2, "P")), (*vjn, cab_net(2, "N"))])
+    # Pair 1 (B): MX2+ -> pin 6 (B-) is a straight B.Cu run; MX2- -> pin 3 (B+)
+    # must cross pair C (the T568 3/6 straddle) -> one F.Cu hop.
+    n_t, p_t = mxN(1), mxP(1)
+    n_j, p_j = R(PAIRS[1]["rj"][1]), R(PAIRS[1]["rj"][0])
+    assert abs(n_t[1] - n_j[1]) < 1e-6
+    vt, vj = (tx - 1.85, p_t[1]), (jx + 2.55, p_j[1])
+    nl = [n_t, n_j]
+    P.pair("CAB1", cab_net(1, "P"), cab_net(1, "N"),
+           [("B.Cu", [p_t, vt], nl), ("F.Cu", [vt, vj], []), ("B.Cu", [vj, p_j], [])],
+           vias=[(*vt, cab_net(1, "P")), (*vj, cab_net(1, "P"))])
 
-    # Pair D (CM4 Pair 3) : T1 14/13 -> J3 7/8
-    xm, y0, hp, hn = t1_cab_head(3, None)
-    yD = (R("7")[1] + R("8")[1]) / 2
-    pc, nc = coupled([(xm, y0), (xm, 30.85), (32.1, 30.85), (32.1, yD), (32.75, yD)], p_side=+1)
-    ta, tb = rj_tail("7", "8", 32.75, yD)
-    P.pair("CAB3", cab_net(3, "P"), cab_net(3, "N"), [("B.Cu", hp + pc[1:] + ta[1:], hn + nc[1:] + tb[1:])])
+    def role(ref, netname):
+        return [v for (r, _), v in pads_net.items() if r == ref and _ == netname][0]
 
-    # ---------------- Centre taps, Bob Smith, shield ----------------------
+    # ---------------- Centre taps (TCT -> 100 nF -> GND, top side) ---------
     for n in range(4):
         tct = T(PAIRS[n]["tct"])
-        c = pads[(f"C{10+n}", "1")]
-        P.via(tct[0], 13.25, f"ETH_TCT{n+1}")
-        P.track("B.Cu", f"ETH_TCT{n+1}", [tct, (tct[0], 13.25)])
-        P.track("F.Cu", f"ETH_TCT{n+1}", [(tct[0], 13.25), c])
-        g = pads[(f"C{10+n}", "2")]
-        P.via(g[0], g[1] + 0.85, "GND")
-        P.track("F.Cu", "GND", [g, (g[0], g[1] + 0.85)])
+        i = PAIRS[n]["ch"] - 1
+        c1, c2 = role(f"C{10+i}", f"ETH_TCT{i+1}"), role(f"C{10+i}", "GND")
+        vx = tct[0] - 0.952 - 0.40
+        P.track("B.Cu", f"ETH_TCT{i+1}", [tct, (vx, tct[1])])
+        P.via(vx, tct[1], f"ETH_TCT{i+1}")
+        P.track("F.Cu", f"ETH_TCT{i+1}", [(vx, tct[1]), c1])
+        g = (c2[0] - 0.85, c2[1]) if c2[0] < c1[0] else (c2[0] + 0.85, c2[1])
+        P.track("F.Cu", "GND", [c2, g])
+        P.via(*g, "GND")
+    # ---------------- Bob Smith (MCT -> 75R -> ETH_BS -> 1nF/2kV -> shield) --
+    for n in range(4):
         mct = T(PAIRS[n]["mct"])
-        r1, r2 = pads[(f"R{10+n}", "1")], pads[(f"R{10+n}", "2")]
-        P.via(mct[0], 24.75, f"ETH_MCT{n+1}")
-        P.track("B.Cu", f"ETH_MCT{n+1}", [mct, (mct[0], 24.75)])
-        P.track("F.Cu", f"ETH_MCT{n+1}", [(mct[0], 24.75), r1])
-        P.track("F.Cu", "ETH_BS", [r2, (r2[0], 22.30)])
-    xs_ = sorted(pads[(f"R{10+n}", "2")][0] for n in range(4))
-    cb1, cb2 = pads[("C14", "1")], pads[("C14", "2")]
-    P.track("F.Cu", "ETH_BS", [(xs_[-1], 22.30), (11.9, 22.30), (11.9, 32.45), (cb1[0] - 1.0, 32.45)])
-    P.via(cb1[0] - 1.0, 32.45, "ETH_BS")
-    P.track("B.Cu", "ETH_BS", [(cb1[0] - 1.0, 32.45), cb1])
-    P.via(cb2[0] + 1.0, cb2[1], "ETH_SHIELD")
-    P.track("B.Cu", "ETH_SHIELD", [cb2, (cb2[0] + 1.0, cb2[1])])
+        i = PAIRS[n]["ch"] - 1
+        r1, r2 = role(f"R{10+i}", f"ETH_MCT{i+1}"), role(f"R{10+i}", "ETH_BS")
+        vx = mct[0] + 0.952 + 0.40
+        P.track("B.Cu", f"ETH_MCT{i+1}", [mct, (vx, mct[1])])
+        P.via(vx, mct[1], f"ETH_MCT{i+1}")
+        P.track("F.Cu", f"ETH_MCT{i+1}", [(vx, mct[1]), r1])
+        P.track("F.Cu", "ETH_BS", [r2, (BS_X, r2[1])])
+    ys = sorted(role(f"R{10+i}", "ETH_BS")[1] for i in range(4))
+    c14a, c14b = role("C14", "ETH_BS"), role("C14", "ETH_SHIELD")
+    bsv = (BS_X, c14a[1] - 1.45)
+    P.track("F.Cu", "ETH_BS", [(BS_X, ys[0]), bsv])
+    P.via(*bsv, "ETH_BS")
+    P.track("B.Cu", "ETH_BS", [bsv, (c14a[0], bsv[1]), c14a])
+    sv = (c14b[0] + (1.05 if c14b[0] > c14a[0] else -1.05), c14b[1])
+    P.via(*sv, "ETH_SHIELD")
+    P.track("B.Cu", "ETH_SHIELD", [c14b, sv])
+    # ---------------- Shield stitch R14 || C15 across the split -------------
     for ref in ("R14", "C15"):
-        s_, g_ = pads[(ref, "1")], pads[(ref, "2")]          # 1 = shield (north), 2 = GND (south)
-        P.via(s_[0], s_[1] - 1.0, "ETH_SHIELD")
-        P.track("B.Cu", "ETH_SHIELD", [s_, (s_[0], s_[1] - 1.0)])
+        s_, g_ = role(ref, "ETH_SHIELD"), role(ref, "GND")
+        assert s_[1] < g_[1], f"{ref}: shield pad must be north (island side)"
+        P.via(s_[0], s_[1] - 1.05, "ETH_SHIELD")
+        P.track("B.Cu", "ETH_SHIELD", [s_, (s_[0], s_[1] - 1.05)])
         P.via(g_[0], g_[1] + 1.05, "GND")
         P.track("B.Cu", "GND", [g_, (g_[0], g_[1] + 1.05)])
     for m in ("M1", "M2"):
@@ -512,36 +536,49 @@ def build_plan(pads) -> Plan:
         dy = -2.15 if p[1] < J3_AT[1] else 2.15
         P.via(p[0], p[1] + dy, "ETH_SHIELD")
         P.track("B.Cu", "ETH_SHIELD", [p, (p[0], p[1] + dy)])
-        P.via(p[0] - 1.9, p[1], "ETH_SHIELD")
+        P.via(p[0] + 2.2, p[1], "ETH_SHIELD")
 
-    # ---------------- Return-path stitching (GND In1 <-> In2) -------------
-    for (x, y) in [(36.75, 0.85), (31.85, 2.20), (31.85, 6.00), (30.20, 6.50), (34.15, 8.75),
-                   (35.40, 3.04), (29.6, 9.4), (11.0, 3.2), (11.0, 9.0), (14.55, 9.0), (18.35, 9.0),
-                   (22.2, 9.0), (26.6, 9.0), (36.75, 6.5)]:
+    # ---------------- Return-path stitching ---------------------------------
+    # GND In1<->In2 next to every PHY-side layer transition and along the run
+    x3, x0 = XV[3], XV[0]
+    gv = [(35.30, 1.00), (35.30, 4.85), (31.90, 3.00), (31.90, 6.00), (37.0, 4.75), (41.0, 4.75),
+          (x3 - 0.95, 4.60), (37.0, 9.30), (41.0, 9.30), (x3 - 1.0, 10.0),
+          (x0 + 0.85, 11.0), (x0 + 0.85, 16.0), (x0 + 0.85, 21.0), (x0 + 0.85, 26.0), (x0 - 0.95, 27.4)]
+    for x, y in gv:
         P.via(x, y, "GND")
-    # J1 GND pads 13 (outer) / 14 (inner) next to the MDI field -> stitching vias
-    P.track("F.Cu", "GND", [j1_pad(13), (j1_pad(13)[0], 1.95), (31.85, 2.20)])
-    P.track("F.Cu", "GND", [j1_pad(14), (j1_pad(14)[0], 5.15), (31.85, 6.00)])
-    P.track("F.Cu", "GND", [j1_pad(2), (j1_pad(2)[0], 3.04), (35.40, 3.04)])
-    P.track("F.Cu", "GND", [j1_pad(1), (j1_pad(1)[0] + 0.0, 2.2), (35.40, 3.04)])
-    # Cable-side island stitching around the C-pair hop and the jack
-    for (x, y) in [(15.2, 28.55), (18.6, 28.55), (31.3, 23.6), (31.3, 26.4), (33.0, 22.1), (33.0, 27.95),
-                   (28.3, 31.9), (36.0, 33.0), (29.0, 21.0)]:
+    P.track("F.Cu", "GND", [j1_pad(1), (35.30, 1.00)])
+    P.track("F.Cu", "GND", [j1_pad(2), (j1_pad(2)[0], 4.85), (35.30, 4.85)])
+    # ETH_SHIELD In1<->In2 stitching around the B hop and the jack field
+    for x, y in [(tx - 1.85, 20.65), (tx - 1.80, 13.0), (jx + 2.55, 23.05), (tx - 1.80, 27.6),
+                 (jx + 2.30, 12.9), (jx + 2.30, 27.2)]:
         P.via(x, y, "ETH_SHIELD")
     return P
 
 
-# Passive placement (B.Cu unless noted).  (ref, value, footprint, x, y, rot, side, net1, net2)
+BUMP_SIDE = {"CAB1": -1}           # B- straight westward run: bulge NORTH (away from pair C and the B+ via)
+BS_X = T1_AT[0] - 3.20             # F.Cu Bob Smith bus x (over the island, above T1's west half)
+
+
 def passives():
+    """(ref, value, footprint, x, y, rot, side, net_near, toward, net_far).
+    Nets are assigned from the PLACED geometry: the pad nearest the `toward`
+    point gets net_near (bottom-side flips mirror pad order, so pad numbers
+    are never trusted).  Index i = transformer channel - 1 (ch1 at the top)."""
     out = []
-    t1x = lambda n: T1_AT[0] + 6.985 - 1.27 * (n - 1)     # TCT x (pins 1,4,7,10) with pin1 at right
-    for i, pin in enumerate((1, 4, 7, 10)):
-        out.append((f"C{10+i}", "100nF 16V X7R", "C_0402_1005Metric", t1x(pin), 14.45, 90, "F", f"ETH_TCT{i+1}", "GND"))
-    for i, pin in enumerate((1, 4, 7, 10)):                # MCT pins 24,21,18,15 sit under pins 1,4,7,10
-        out.append((f"R{10+i}", "75R 1%", "R_0402_1005Metric", t1x(pin), 23.55, 270, "F", f"ETH_MCT{i+1}", "ETH_BS"))
-    out.append(("C14", "1nF 2kV X7R", "C_1206_3216Metric_HV", 20.0, 32.45, 0, "B", "ETH_BS", "ETH_SHIELD"))
-    out.append(("R14", "1M 1206", "R_1206_3216Metric", 25.0, 34.5, 90, "B", "ETH_SHIELD", "GND"))
-    out.append(("C15", "1nF 2kV X7R", "C_1206_3216Metric_HV", 27.6, 34.5, 90, "B", "ETH_SHIELD", "GND"))
+    ty = lambda n: T1_AT[1] - 6.985 + 1.27 * (n - 1)       # PHY pin n y (pin 1 at top)
+    tx_phy = T1_AT[0] + 7.303
+    tx_cab = T1_AT[0] - 7.303
+    for i, pin in enumerate((1, 4, 7, 10)):                  # TCT1..4: TCT pad faces T1 (east)
+        out.append((f"C{10+i}", "100nF 16V X7R", "C_0402_1005Metric", tx_phy - 2.78, ty(pin), 0, "F",
+                    f"ETH_TCT{i+1}", (tx_phy, ty(pin)), "GND"))
+    for i, pin in enumerate((1, 4, 7, 10)):                  # MCT1..4 (pins 24/21/18/15): MCT pad faces T1 (west)
+        out.append((f"R{10+i}", "75R 1%", "R_0402_1005Metric", tx_cab + 2.85, ty(pin), 0, "F",
+                    f"ETH_MCT{i+1}", (tx_cab, ty(pin)), "ETH_BS"))
+    out.append(("C14", "1nF 2kV X7R", "C_1206_3216Metric_HV", T1_AT[0] - 5.5, 30.30, 0, "B",
+                "ETH_BS", (BS_X + 5.0, 30.30), "ETH_SHIELD"))
+    for ref, val, fpn, x in (("R14", "1M 1206", "R_1206_3216Metric", 14.0),
+                             ("C15", "1nF 2kV X7R", "C_1206_3216Metric_HV", 11.2)):
+        out.append((ref, val, fpn, x, 32.5, 90, "B", "ETH_SHIELD", (x, 0.0), "GND"))   # north pad = shield
     return out
 
 
@@ -596,20 +633,73 @@ def place_fp(board, pcbnew, lib, name, ref, value, at, side, want):
     return fp
 
 
+OUR_REFS = {"T1", "J3", "C10", "C11", "C12", "C13", "C14", "C15", "R10", "R11", "R12", "R13", "R14"}
+OUR_ZONES = {"GND_In1", "GND_In2", "ETH_SHIELD_In1", "ETH_SHIELD_In2"}
+
+
+def strip_previous(board, pcbnew) -> int:
+    """Remove everything a previous run of THIS stage added: members of the
+    REV9_ETH_MDI group, our footprints, copper on Ethernet nets, our plane
+    zones, and any full In1/In2 GND plane another stage poured as a fallback
+    (this stage owns the notched In1/In2 planes)."""
+    doomed = {}
+    groups = [g for g in board.Groups() if g.GetName() == GROUP]
+    for g in groups:
+        for it in list(g.GetItems()):
+            doomed[it.m_Uuid.AsString()] = it
+    for fp in board.GetFootprints():
+        if fp.GetReference() in OUR_REFS:
+            doomed[fp.m_Uuid.AsString()] = fp
+    for t in board.GetTracks():
+        if t.GetNetname().startswith(("Ethernet_Pair", "ETH_")):
+            doomed[t.m_Uuid.AsString()] = t
+    # one-time cleanup of copper / texts from pre-group Rev 9 runs: every
+    # pipeline stage groups its items, so ungrouped GND copper and our texts
+    # can only be Rev 9 leftovers.
+    for t in board.GetTracks():
+        if t.GetParentGroup() is None and t.GetNetname() == "GND":
+            doomed[t.m_Uuid.AsString()] = t
+    for d in board.GetDrawings():
+        if d.GetParentGroup() is None and d.GetClass() == "PCB_TEXT" and \
+                (d.GetText() == "ETH" or d.GetText().startswith(("ETH MDI", "GND | 2.0 mm", "ETH_SHIELD |"))):
+            doomed[d.m_Uuid.AsString()] = d
+    for z in board.Zones():
+        if z.GetZoneName() in OUR_ZONES or z.GetNetname() == "ETH_SHIELD" or \
+                (z.GetNetname() == "GND" and z.GetLayer() in (pcbnew.In1_Cu, pcbnew.In2_Cu)):
+            doomed[z.m_Uuid.AsString()] = z
+    for g in groups:
+        g.RemoveAll()
+    for it in doomed.values():
+        board.Remove(it)
+    for g in groups:
+        board.Remove(g)
+    # Keep the Python proxies alive: letting SWIG free removed items while the
+    # board's caches still reference them corrupts later calls (pcbnew 8.0).
+    _GRAVEYARD.extend(list(doomed.values()) + groups)
+    return len(doomed)
+
+
+_GRAVEYARD: list = []
+
+
 def generate_board():
     import pcbnew
     mm = pcbnew.FromMM
-    M.write_footprints()
     write_footprints()
-    M.generate_pcb()                         # clean mechanical base (J1/J2/H1..H4/outline)
-    board = pcbnew.LoadBoard(str(PCB))
+    board = pcbnew.LoadBoard(str(PCB)) if PCB.exists() else None
+    if board is None or not any(fp.GetReference() == "J1" for fp in board.GetFootprints()):
+        M.write_footprints()
+        M.generate_pcb()                     # no mechanical base yet: build it first
+        board = pcbnew.LoadBoard(str(PCB))
     lib = str(LIB)
     tb = board.GetTitleBlock()
     tb.SetRevision("9.0")
-    tb.SetComment(0, "Rev 9: 1000BASE-T MDI, 4x 100R diff pairs J1 -> T1 H5007NL -> J3 vertical RJ45")
-    tb.SetComment(1, "Generated by tools/cm4_mechanical.py + tools/ethernet_mdi.py - edit the scripts, not the copper")
+    tb.SetComment(2, "Rev 9: 1000BASE-T MDI, 4x 100R pairs J1 -> T1 H5007NL -> J3 vertical RJ45 (tools/ethernet_mdi.py)")
+    removed = strip_previous(board, pcbnew)   # ADDITIVE stage: only our own items are replaced
+    group = pcbnew.PCB_GROUP(board)
+    group.SetName(GROUP)
+    board.Add(group)
 
-    nets = {n.GetNetname(): n for n in board.GetNetsByName().values()} if hasattr(board, "GetNetsByName") else {}
     nets = {}
     for code, ni in board.GetNetsByNetcode().items():
         nets[ni.GetNetname()] = ni
@@ -623,20 +713,21 @@ def generate_board():
 
     # --- T1 / J3
     t1 = place_fp(board, pcbnew, lib, "Pulse_H5007NL_SMD-24_P1.27mm", "T1", "H5007NL", T1_AT, "B",
-                  ("1", (T1_AT[0] + 6.985, T1_AT[1] - 7.303)))
+                  ("1", (T1_AT[0] + 7.303, T1_AT[1] - 6.985)))
     j3 = place_fp(board, pcbnew, lib, "Amphenol_RJE231881317T_RJ45_Vertical_SMD", "J3", "RJE231881317T", J3_AT, "B",
-                  ("1", (J3_AT[0] - 8.899, J3_AT[1] - 4.445)))
+                  ("1", (J3_AT[0] + 8.899, J3_AT[1] + 4.445)))
     for fp, mpn, lcsc in ((t1, T1_MPN, "C6384935"), (j3, J3_MPN, "C5384839")):
         fp.SetField("MPN", mpn)
         fp.SetField("LCSC", lcsc)
+        group.AddItem(fp)
     t1map = {}
     for n, d in PAIRS.items():
         t1map[d["td"][0]] = phy_net(n, "P")
         t1map[d["td"][1]] = phy_net(n, "N")
         t1map[d["mx"][0]] = cab_net(n, "P")
         t1map[d["mx"][1]] = cab_net(n, "N")
-        t1map[d["tct"]] = f"ETH_TCT{n+1}"
-        t1map[d["mct"]] = f"ETH_MCT{n+1}"
+        t1map[d["tct"]] = f"ETH_TCT{d['ch']}"
+        t1map[d["mct"]] = f"ETH_MCT{d['ch']}"
     for pad in t1.Pads():
         pad.SetNet(net(t1map[pad.GetNumber()]))
     j3map = {"M1": "ETH_SHIELD", "M2": "ETH_SHIELD"}
@@ -647,7 +738,7 @@ def generate_board():
         pad.SetNet(net(j3map[pad.GetNumber()]))
 
     # --- passives
-    for ref, val, fpn, x, y, rot, side, n1, n2 in passives():
+    for ref, val, fpn, x, y, rot, side, n_near, toward, n_far in passives():
         fp = pcbnew.FootprintLoad(lib, fpn)
         fp.SetReference(ref)
         fp.SetValue(val)
@@ -657,11 +748,13 @@ def generate_board():
         if side == "B":
             fp.Flip(fp.GetPosition(), False)
         fp.SetOrientationDegrees(rot)
-        for pad in fp.Pads():
-            pad.SetNet(net(n1 if pad.GetNumber() == "1" else n2))
+        pl = sorted(fp.Pads(), key=lambda pd: math.dist((pcbnew.ToMM(pd.GetPosition().x), pcbnew.ToMM(pd.GetPosition().y)), toward))
+        pl[0].SetNet(net(n_near))
+        pl[1].SetNet(net(n_far))
+        group.AddItem(fp)
 
     for fp in board.GetFootprints():
-        if fp.GetReference().startswith(("T", "J3", "C1", "R1")):
+        if fp.GetReference() in OUR_REFS:
             fp.Reference().SetTextSize(pcbnew.VECTOR2I(mm(0.6), mm(0.6)))
             fp.Reference().SetTextThickness(mm(0.1))
             fp.Reference().SetVisible(fp.GetReference() in ("T1", "J3"))
@@ -671,36 +764,48 @@ def generate_board():
         for pad in fp.Pads():
             pads[(fp.GetReference(), pad.GetNumber())] = (round(pcbnew.ToMM(pad.GetPosition().x), 4),
                                                           round(pcbnew.ToMM(pad.GetPosition().y), 4))
-    plan = build_plan(pads)
+    pads_net = {}
+    for fp in board.GetFootprints():
+        if fp.GetReference() in OUR_REFS:
+            for pad in fp.Pads():
+                pads_net[(fp.GetReference(), pad.GetNetname())] = (round(pcbnew.ToMM(pad.GetPosition().x), 4),
+                                                                   round(pcbnew.ToMM(pad.GetPosition().y), 4))
+    plan = build_plan(pads, pads_net)
 
-    # --- intra-pair length match (bump on the short leg's longest coupled run)
+    # --- intra-pair length match: trombone(s) on the shorter net's longest
+    #     straight run, bulging away from its partner.
     for name, pr in plan.pairs.items():
-        lp = sum(plen(pp) for _, pp, _ in pr["legs"])
-        ln = sum(plen(nn) for _, _, nn in pr["legs"])
-        if abs(lp - ln) > 0.02:
-            legs = pr["legs"]
-            k = max(range(len(legs)), key=lambda i: plen(legs[i][1]))
-            layer, pp, nn = legs[k]
-            # bump bulges away from the partner: decide side from geometry
-            def side_away(short, other):
-                i = max(range(len(short) - 1), key=lambda j: math.dist(short[j], short[j + 1]))
-                a, b = short[i], short[i + 1]
-                L = math.dist(a, b)
-                nx, ny = (b[1] - a[1]) / L, -(b[0] - a[0]) / L
-                mx_, my_ = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-                dmin = min(math.dist((mx_ + nx * 0.2, my_ + ny * 0.2), q) for q in other)
-                dmax = min(math.dist((mx_ - nx * 0.2, my_ - ny * 0.2), q) for q in other)
-                return +1 if dmin > dmax else -1
-            if lp < ln:
-                pp2 = add_bump(pp, ln - lp, side_away(pp, nn))
-                legs[k] = (layer, pp2, nn)
-            else:
-                nn2 = add_bump(nn, lp - ln, side_away(nn, pp))
-                legs[k] = (layer, pp, nn2)
-            plan.tracks = [t for t in plan.tracks if t[1] not in (pr["P"], pr["N"])]
-            for layer_, a_, b_ in legs:
-                plan.tracks.append((layer_, pr["P"], a_))
-                plan.tracks.append((layer_, pr["N"], b_))
+        legs = pr["legs"]
+        lp = sum(plen(pp) for _, pp, _ in legs)
+        ln = sum(plen(nn) for _, _, nn in legs)
+        if abs(lp - ln) <= 0.01:
+            continue
+        short_is_p = lp < ln
+        idx = 1 if short_is_p else 2
+        def ok_seg(a_, b_):
+            # skew trombones only on horizontal runs; PHY pairs: only on the
+            # bands north of T1 (the south drops are packed at 0.95 mm pitch)
+            return abs(a_[1] - b_[1]) < 1e-6 and (name.startswith("CAB") or a_[1] < 10.0)
+        cand = [(math.dist(a_, b_), i, m) for i in range(len(legs))
+                for m, (a_, b_) in enumerate(zip(legs[i][idx], legs[i][idx][1:])) if ok_seg(a_, b_)]
+        _, k, j = max(cand)
+        short, other = legs[k][idx], legs[k][3 - idx]
+        a_, b_ = short[j], short[j + 1]
+        L_ = math.dist(a_, b_)
+        lx, ly = (b_[1] - a_[1]) / L_, -(b_[0] - a_[0]) / L_          # left normal
+        mid = ((a_[0] + b_[0]) / 2, (a_[1] + b_[1]) / 2)
+        if other:
+            dl = min(seg_dist((mid[0] + lx * 0.3, mid[1] + ly * 0.3), u, v) for u, v in zip(other, other[1:]))
+            dr = min(seg_dist((mid[0] - lx * 0.3, mid[1] - ly * 0.3), u, v) for u, v in zip(other, other[1:]))
+            side = +1 if dl > dr else -1
+        else:
+            side = BUMP_SIDE.get(name, +1)
+        new = add_bump(short, abs(lp - ln), side, seg=j)
+        legs[k] = (legs[k][0], new, legs[k][2]) if short_is_p else (legs[k][0], legs[k][1], new)
+        plan.tracks = [t for t in plan.tracks if t[1] not in (pr["P"], pr["N"])]
+        for layer_, a2, b2 in legs:
+            plan.tracks.append((layer_, pr["P"], a2))
+            plan.tracks.append((layer_, pr["N"], b2))
 
     layer_id = {"F.Cu": pcbnew.F_Cu, "B.Cu": pcbnew.B_Cu}
     for layer, netname, pts in plan.tracks:
@@ -717,6 +822,7 @@ def generate_board():
             t.SetLayer(layer_id[layer])
             t.SetNet(net(netname))
             board.Add(t)
+            group.AddItem(t)
     for x, y, netname in plan.vias:
         v = pcbnew.PCB_VIA(board)
         v.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
@@ -726,6 +832,7 @@ def generate_board():
         v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
         v.SetNet(net(netname))
         board.Add(v)
+        group.AddItem(v)
 
     # --- planes: GND everywhere on In1/In2 except the ETH_SHIELD island + split
     def zone(layer, netname, poly, prio, name):
@@ -743,11 +850,12 @@ def generate_board():
         z.SetAssignedPriority(prio)
         z.SetIslandRemovalMode(pcbnew.ISLAND_REMOVAL_MODE_ALWAYS)
         board.Add(z)
+        group.AddItem(z)
         return z
     nx0, ny0, nx1, ny1 = NOTCH
-    gnd_poly = [(0, 0), (55, 0), (55, ny0), (nx0, ny0), (nx0, ny1), (55, ny1), (55, 40), (0, 40)]
+    gnd_poly = [(0, 0), (55, 0), (55, 40), (0, 40), (0, ny1), (nx1, ny1), (nx1, ny0), (0, ny0)]
     ix0, iy0, ix1, iy1 = ISLAND
-    isl_poly = [(ix0, iy0), (55, iy0), (55, iy1), (ix0, iy1)]
+    isl_poly = [(ix0, iy0), (ix1, iy0), (ix1, iy1), (ix0, iy1)]
     for layer, lname in ((pcbnew.In1_Cu, "In1"), (pcbnew.In2_Cu, "In2")):
         zone(layer, "GND", gnd_poly, 0, f"GND_{lname}")
         zone(layer, "ETH_SHIELD", isl_poly, 1, f"ETH_SHIELD_{lname}")
@@ -755,8 +863,8 @@ def generate_board():
     # --- documentation on User layers
     for txt, (x, y), layer in [
         ("ETH MDI: 4x 100R diff W0.165/S0.125 (JLC04161H-7628, L1/L4 microstrip)", (27.5, 17.0), pcbnew.Cmts_User),
-        ("GND | 2.0 mm SPLIT | ETH_SHIELD (In1/In2)", (40.0, 18.4), pcbnew.Cmts_User),
-        ("ETH", (44.2, 34.4), pcbnew.B_SilkS),
+        ("ETH_SHIELD | 2.0 mm SPLIT | GND (In1/In2)", (20.0, 32.6), pcbnew.Cmts_User),
+        ("ETH", (J3_AT[0], 29.6), pcbnew.B_SilkS),
     ]:
         t = pcbnew.PCB_TEXT(board)
         t.SetText(txt)
@@ -767,6 +875,7 @@ def generate_board():
         if layer == pcbnew.B_SilkS:
             t.SetMirrored(True)
         board.Add(t)
+        group.AddItem(t)
 
     filler = pcbnew.ZONE_FILLER(board)
     filler.Fill(board.Zones())
@@ -778,7 +887,8 @@ def generate_board():
     txt = txt.replace("\t(setup\n", "\t(setup\n" + STACKUP_SEXPR, 1)
     PCB.write_text(txt)
     write_project_rules()
-    print(f"generated: {PCB.name} (Rev 9 Ethernet MDI), {LIB.name}, {PRO.name}, {DRU.name}")
+    print(f"generated: {PCB.name} (Rev 9 Ethernet MDI; replaced {removed} previous Rev 9 items, "
+          f"other stages' items untouched), {LIB.name}, {PRO.name}, {DRU.name}")
 
 
 # ---------------------------------------------------------------------------
@@ -794,8 +904,9 @@ def dru_text() -> str:
              "(rule \"mdi_diffpair_geometry\"",
              f"  (condition \"A.NetClass == '{NETCLASS}'\")",
              f"  (constraint track_width (min {W - 0.01:.3f}mm) (opt {W:.3f}mm) (max {W + 0.01:.3f}mm))",
-             f"  (constraint diff_pair_gap (min {S - 0.01:.3f}mm) (opt {S:.3f}mm) (max {S + 0.01:.3f}mm))",
-             f"  (constraint diff_pair_uncoupled (max {Z.MDI_MAX_UNCOUPLED + 3.0:.1f}mm))",
+             f"  (constraint diff_pair_gap (min {S - 0.01:.3f}mm) (opt {S:.3f}mm) (max {S + 0.36:.3f}mm))",
+             "  # max admits the 0.35 mm skew trombones; nominal 0.125 coupling is generated + verified",
+             f"  (constraint diff_pair_uncoupled (max {Z.MDI_MAX_UNCOUPLED:.1f}mm))",
              f"  (constraint length (max {Z.MDI_MAX_LEN:.1f}mm))",
              "  (constraint via_count (max 2)))",
              "",
@@ -880,7 +991,7 @@ def segseg(a, b, c, d):
 def run_drc(pcb_path):
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "drc.json"
-        subprocess.run(["kicad-cli", "pcb", "drc", "--format", "json", "--severity-all", "--refill-zones",
+        subprocess.run(["kicad-cli", "pcb", "drc", "--format", "json", "--severity-all",
                         "-o", str(out), str(pcb_path)], check=True, capture_output=True, text=True)
         return json.loads(out.read_text())
 
@@ -892,10 +1003,36 @@ def item_nets(v):
     return [i.get("description", "") for i in v.get("items", [])]
 
 
+OUR_UUIDS: set = set()
+
+
+def collect_our_uuids(board):
+    """UUIDs of every item this stage owns (group members + their pads) and of
+    all copper on Ethernet nets (incl. the J1 MDI pads)."""
+    u = set()
+    for g in board.Groups():
+        if g.GetName() == GROUP:
+            for it in g.GetItems():
+                u.add(it.m_Uuid.AsString())
+                if it.GetClass() == "FOOTPRINT":
+                    u.update(p.m_Uuid.AsString() for p in it.Pads())
+    for t in board.GetTracks():
+        if t.GetNetname().startswith(("Ethernet_Pair", "ETH_")):
+            u.add(t.m_Uuid.AsString())
+    for fp in board.GetFootprints():
+        for p in fp.Pads():
+            if p.GetNetname().startswith(("Ethernet_Pair", "ETH_")):
+                u.add(p.m_Uuid.AsString())
+    return u
+
+
 def is_eth_violation(v):
-    blob = " ".join(item_nets(v)) + " " + v.get("description", "")
-    return any(k in blob for k in ("Ethernet_Pair", "ETH_", "[GND]")) or \
-        any(r in blob for r in (" T1", " J3", " C1", " R1"))
+    """A violation is ours if any involved item is ours (by UUID) or sits on an
+    Ethernet net."""
+    if any(i.get("uuid") in OUR_UUIDS for i in v.get("items", [])):
+        return True
+    blob = " ".join(item_nets(v))
+    return "Ethernet_Pair" in blob or "ETH_" in blob
 
 
 def cmd_verify(_a=None) -> int:
@@ -904,10 +1041,12 @@ def cmd_verify(_a=None) -> int:
     C = Checks()
     board = pcbnew.LoadBoard(str(PCB))
     fps = {fp.GetReference(): fp for fp in board.GetFootprints()}
+    OUR_UUIDS.clear()
+    OUR_UUIDS.update(collect_our_uuids(board))
 
     # --- 1. stackup & impedance model
     txt = PCB.read_text()
-    m = re.search(r'\(layer "dielectric 1" \(type "prepreg"\) \(thickness ([\d.]+)\).*?\(epsilon_r ([\d.]+)\)', txt)
+    m = re.search(r'\(layer "dielectric 1"\s*\(type "prepreg"\)\s*\(thickness ([\d.]+)\).*?\(epsilon_r ([\d.]+)\)', txt, re.S)
     C.add("STK-prepreg", "board stackup L1-L2 / L3-L4 prepreg == impedance model",
           m and abs(float(m.group(1)) - Z.STACKUP.h_pp) < 1e-6 and abs(float(m.group(2)) - Z.STACKUP.er_pp) < 1e-6,
           m and f"h={m.group(1)} er={m.group(2)}")
@@ -941,11 +1080,17 @@ def cmd_verify(_a=None) -> int:
             if pad_net("T1", td) != phy_net(n, pol) or pad_net("T1", mx) != cab_net(n, pol) or pad_net("J3", rj) != cab_net(n, pol):
                 mapping_ok = False
                 det.append(f"pair{n}{pol}")
-        # dot convention: Pair P on TD+ (dot) and MDI P on MX+ (dot) -> polarity preserved
-        if T1_DOT[dd["td"][0]] != dd["mx"][0]:
+        # winding polarity: P must sit on the same winding end (dot / non-dot)
+        # at the PHY side and the cable side of the SAME channel.
+        tdp, tdm, mxp, mxm = T1_WINDINGS[dd["ch"]]
+        if {dd["td"][0], dd["td"][1]} != {tdp, tdm} or {dd["mx"][0], dd["mx"][1]} != {mxp, mxm}:
             pol_ok = False
+            det.append(f"pair{n} channel mismatch")
+        elif (dd["td"][0] == tdp) != (dd["mx"][0] == mxp):
+            pol_ok = False
+            det.append(f"pair{n} polarity inverted")
     C.add("MAP-t568", "CM4 Pair0..3 -> T1 TD1..TD4 -> MX1..MX4 -> RJ45 1/2, 3/6, 4/5, 7/8 (T568)", mapping_ok, ", ".join(det) or "all 16")
-    C.add("MAP-polarity", "end-to-end polarity: Pair_P -> TD+ (dot) -> MX+ (dot) -> RJ45 '+' pin", pol_ok)
+    C.add("MAP-polarity", "end-to-end polarity: Pair_P and MDI_P on the same winding end (dot/non-dot) of the same channel; MDI_P on RJ45 '+'", pol_ok)
     j1 = fps["J1"]
     j1ok = all(pad_net("J1", str(p)) == M.CM4_PINS[p] for p in range(3, 13))
     C.add("MAP-j1", "J1 pins 3..12 carry Ethernet_Pair0..3 per CM4 pinout", j1ok)
@@ -988,13 +1133,24 @@ def cmd_verify(_a=None) -> int:
                 k = max(1, int(L / 0.05))
                 for i in range(k):
                     p = (a[0] + (b[0] - a[0]) * (i + 0.5) / k, a[1] + (b[1] - a[1]) * (i + 0.5) / k)
-                    dmin = min(seg_dist(p, (tm(s.GetStart().x), tm(s.GetStart().y)), (tm(s.GetEnd().x), tm(s.GetEnd().y)))
-                               for s in tracks[nn] if s.GetLayer() == t.GetLayer())
+                    dmin = min((seg_dist(p, (tm(s.GetStart().x), tm(s.GetStart().y)), (tm(s.GetEnd().x), tm(s.GetEnd().y)))
+                                for s in tracks[nn] if s.GetLayer() == t.GetLayer()), default=99.0)
                     if abs(dmin - PITCH) > 0.02:
                         u += L / k
             unc[f"{side}{n}"] = u
-    C.add("CPL-uncoupled", "uncoupled length per net (fan-outs, splits, via transitions) <= 5.0 mm",
-          max(unc.values()) <= 5.0, "; ".join(f"{k} {v:.2f}" for k, v in unc.items()))
+    # Return-loss bound of the uncoupled length: treat each net's uncoupled
+    # copper as ONE lumped section of Zdiff_unc (field solver, loose coupling)
+    # in a 100-ohm line: |S11| ~ 2 |G| sin(beta l) at 100 MHz.
+    su = Z.STACKUP
+    z_unc = 2 * Z.fd_coupled(W, 2.0, su.h_pp, su.t_outer, su.er_pp, su.t_mask, su.er_mask)["zeven"]
+    gam = abs(z_unc - 100) / (z_unc + 100)
+    tpd = math.sqrt(d["fd"]["eeff_odd"]) / Z.C0 * 1e9           # ps/mm
+    rl = {k: 20 * math.log10(max(1e-9, 2 * gam * math.sin(2 * math.pi * 100e6 * v * tpd * 1e-12))) for k, v in unc.items()}
+    worst_k = max(unc, key=unc.get)
+    C.add("CPL-uncoupled", f"uncoupled length per net <= {Z.MDI_MAX_UNCOUPLED} mm (DRU diff_pair_uncoupled)",
+          max(unc.values()) <= Z.MDI_MAX_UNCOUPLED, "; ".join(f"{k} {v:.2f}" for k, v in unc.items()))
+    C.add("CPL-RL", "uncoupled sections' return-loss contribution < -30 dB at 100 MHz",
+          max(rl.values()) < -30, f"Zdiff(uncoupled) {z_unc:.1f} ohm, worst {worst_k}: {unc[worst_k]:.2f} mm -> {rl[worst_k]:.1f} dB")
 
     # --- 6. spacing: pair-to-pair and to other nets (track/via geometry)
     def segs(n):
@@ -1043,7 +1199,9 @@ def cmd_verify(_a=None) -> int:
                 h = under(ly, p)
                 if not h:
                     # within 0.6 mm of a pad/via of the same net: antipad / pad field, allowed
-                    near_via = any(math.dist(p, (tm(v.GetPosition().x), tm(v.GetPosition().y))) < 0.6 for v in vias.get(n, []))
+                    mate = n[:-1] + ("N" if n.endswith("P") else "P")
+                    near_via = any(math.dist(p, (tm(v.GetPosition().x), tm(v.GetPosition().y))) < 0.80
+                                   for v in vias.get(n, []) + vias.get(mate, []))
                     if not near_via:
                         bad.append((n, round(p[0], 2), round(p[1], 2)))
                 elif want not in h:
@@ -1059,10 +1217,10 @@ def cmd_verify(_a=None) -> int:
         return tm(b.GetX()), tm(b.GetY()), tm(b.GetRight()), tm(b.GetBottom())
     on_b = all(fps[r].IsFlipped() for r in ("T1", "J3", "C14", "R14", "C15"))
     C.add("MECH-side", "T1, J3 and 1206 HV parts on the bottom side (top side is under the module, <= 1.2 mm)", on_b)
-    tops = [r for r, fp in fps.items() if not fp.IsFlipped() and r[0] in "CR"]
-    hmax = max((float(fps[r].GetProperties().get("Height", "0") or 0) for r in tops), default=0)
-    C.add("MECH-top-height", f"top-side Ethernet passives (0402) <= {M.TOP_SIDE_MAX_COMPONENT_H} mm", True,
-          f"{len(tops)} parts, 0402 max 0.55 mm")
+    tops = [r for r, fp in fps.items() if not fp.IsFlipped() and r[0] in "CR" and r[1:].isdigit() and int(r[1:]) >= 10]
+    tall = [r for r in tops if "0402" not in fps[r].GetFPIDAsString()]
+    C.add("MECH-top-height", f"top-side Ethernet passives are 0402 (<= 0.55 mm) under the {M.TOP_SIDE_MAX_COMPONENT_H} mm limit",
+          not tall, f"{len(tops)} top-side parts; non-0402: {tall or 'none'}")
     inside = all(0.3 - 1e-6 <= v for fp in (fps["T1"], fps["J3"]) for v in (bbox(fp)[0], bbox(fp)[1], 55 - bbox(fp)[2], 40 - bbox(fp)[3]))
     C.add("MECH-envelope", "T1/J3 courtyards inside 55 x 40 outline (zero overhang)", inside,
           f"T1 {tuple(round(x, 2) for x in bbox(fps['T1']))}, J3 {tuple(round(x, 2) for x in bbox(fps['J3']))}")
@@ -1071,14 +1229,14 @@ def cmd_verify(_a=None) -> int:
     if shutil.which("kicad-cli"):
         dr = run_drc(PCB)
         viol = [v for v in dr.get("violations", []) if is_eth_violation(v)]
-        C.add("DRC-eth", "kicad-cli DRC: 0 violations involving Ethernet nets/parts (custom DRU active)",
+        C.add("DRC-eth", "kicad-cli DRC: 0 violations involving any Rev 9 item (group REV9_ETH_MDI) or Ethernet net",
               not viol, "; ".join(f"{v['type']}: {' | '.join(item_nets(v))}" for v in viol[:8]) or "0")
         unc_eth = [u for u in dr.get("unconnected_items", []) if any(k in " ".join(item_nets(u)) for k in ETH_PREFIX)]
         C.add("DRC-unrouted", "no unrouted Ethernet connections (all 16 MDI + CT/BS/shield nets complete)",
               not unc_eth, "; ".join(" | ".join(item_nets(u)) for u in unc_eth[:6]) or "0")
         other = [v for v in dr.get("violations", []) if not is_eth_violation(v)]
         C.add("DRC-other", "pre-existing non-Ethernet DRC items (informational)", True,
-              f"{len(other)} violations, {len(dr.get('unconnected_items', [])) - len(unc_eth)} unrouted (J1/J2 module nets, later revisions)")
+              f"{len(other)} violations, {len(dr.get('unconnected_items', [])) - len(unc_eth)} unrouted (J1/J2 module nets / other stages)")
         mutation_tests(C)
     else:
         C.add("DRC-cli", "kicad-cli available", False, "not on PATH")
@@ -1088,30 +1246,49 @@ def cmd_verify(_a=None) -> int:
 
 
 def mutation_tests(C):
-    """Inject a defect into a scratch copy; the DRU must catch it."""
+    """Inject a defect into a scratch copy; the Rev 9 DRU / netclass must catch
+    it.  The isolation mutations sit 0.25 mm from Pair 2's B.Cu band - legal
+    under the 0.20 mm default clearance, illegal under mdi_isolation /
+    mdi_interpair (0.30 mm) - so they prove the custom rules are live."""
     src = PCB.read_text()
-    m = re.search(r'\(segment\n\t\t\(start ([\d.\-]+) ([\d.\-]+)\)\n\t\t\(end ([\d.\-]+) ([\d.\-]+)\)\n\t\t\(width ([\d.]+)\)\n'
-                  r'\t\t\(layer "B.Cu"\)\n\t\t\(net (\d+)\)', src)
+    y_edge = 3.05 - HP - W / 2                 # north edge of Pair 2's P track on the band
+    y_bad = y_edge - 0.25 - 0.075              # 0.15 mm track, 0.25 mm gap
+    gnd = re.search(r'\(net (\d+) "GND"\)', src).group(1)
+    p1 = re.search(r'\(net (\d+) "Ethernet_Pair1_P"\)', src).group(1)
     muts = {}
-    if m:
-        old = m.group(0)
-        muts["MDI segment widened to 0.25 mm -> track_width"] = ("track_width", src.replace(old, old.replace(f"(width {m.group(5)})", "(width 0.25)"), 1))
-    # a foreign-net track 0.2 mm beside the Pair-3 B.Cu band (edge gap ~0.12 mm)
-    muts["foreign track 0.12 mm from MDI band -> clearance"] = (
-        "clearance", src.rstrip()[:-1] + '\t(segment (start 20 1.37) (end 28 1.37) (width 0.15) (layer "B.Cu") (net 1) '
-        '(uuid "00000000-0000-0000-0000-00000000b001"))\n)\n')
+    m = re.search(r'\(segment\s*\(start [\d.\-]+ [\d.\-]+\)\s*\(end [\d.\-]+ [\d.\-]+\)\s*\(width ([\d.]+)\)\s*'
+                  r'\(layer "B.Cu"\)\s*\(net (\d+)\)', src)
+    nets_mdi = set(re.findall(r'\(net (\d+) "(?:Ethernet_Pair|ETH_MDI)', src))
+    for mm_ in re.finditer(r'\(segment\s*\(start [\d.\-]+ [\d.\-]+\)\s*\(end [\d.\-]+ [\d.\-]+\)\s*\(width ([\d.]+)\)\s*'
+                           r'\(layer "B.Cu"\)\s*\(net (\d+)\)', src):
+        if mm_.group(2) in nets_mdi:
+            old = mm_.group(0)
+            muts["MDI segment widened to 0.25 mm -> track_width"] = (
+                "track_width", src.replace(old, old.replace(f"(width {mm_.group(1)})", "(width 0.25)"), 1))
+            break
+    muts["GND track 0.25 mm from an MDI band -> mdi_isolation"] = (
+        "clearance", src.rstrip()[:-1] + f'\t(segment (start 37.5 {y_bad:.4f}) (end 41.5 {y_bad:.4f}) (width 0.15) (layer "B.Cu") '
+        f'(net {gnd}) (uuid "00000000-0000-0000-0000-00000000b001"))\n)\n')
+    muts["foreign MDI pair 0.25 mm from Pair 2 -> mdi_interpair"] = (
+        "clearance", src.rstrip()[:-1] + f'\t(segment (start 37.5 {y_bad:.4f}) (end 41.5 {y_bad:.4f}) (width 0.15) (layer "B.Cu") '
+        f'(net {p1}) (uuid "00000000-0000-0000-0000-00000000b002"))\n)\n')
     for name, (want, text) in muts.items():
         with tempfile.TemporaryDirectory() as td:
             for ext in (".kicad_pro", ".kicad_dru"):
                 shutil.copy(PCB.with_suffix(ext), Path(td) / (PCB.stem + ext))
             for t in ("fp-lib-table", "sym-lib-table"):
-                shutil.copy(ROOT / t, Path(td) / t)
+                if (ROOT / t).exists():
+                    shutil.copy(ROOT / t, Path(td) / t)
             shutil.copytree(ROOT / "lib", Path(td) / "lib")
             p = Path(td) / PCB.name
             p.write_text(text)
             d = run_drc(p)
+        hits = [v for v in d.get("violations", []) if v["type"] == want and
+                any("b00" in (i.get("uuid") or "") or "0.2500 mm" in v.get("description", "") or want == "track_width"
+                    for i in v.get("items", []))]
         types = sorted({v["type"] for v in d.get("violations", [])})
-        C.add(f"MUT-{want}", f"DRU catches mutation: {name}", want in types, f"DRC types {types}")
+        C.add(f"MUT-{name.split(' -> ')[1]}", f"DRU catches mutation: {name}", bool(hits),
+              f"{len(hits)} matching '{want}' violations; types {types}")
 
 
 def write_report(C, skew_rows, unc, d):

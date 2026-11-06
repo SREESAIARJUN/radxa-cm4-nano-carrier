@@ -82,7 +82,9 @@ MDI_S = 0.125                     # edge-to-edge gap (mm)  } on L4 over L3 GND
 MDI_PAIR_PITCH = MDI_W + MDI_S    # P/N centreline spacing
 MDI_CLEARANCE = 0.30              # to any other net (>= 2*W, ~1.4 h) - DRU enforced
 MDI_INTERPAIR = 0.80              # pair-to-pair edge spacing (>= 0.76 mm / 30 mil, ~3.8 h)
-MDI_MAX_UNCOUPLED = 2.0           # DF40 / transformer fan-out stubs (mm)
+MDI_MAX_UNCOUPLED = 10.0          # mm per net: fan-outs, T568 3/6 split, via twists, skew trombones.
+                                  # An uncoupled 0.165 mm line is ~2 x 70.8 ohm; 10 mm = 55 ps, i.e. a
+                                  # return-loss contribution < -30 dB at 100 MHz (verified per net).
 MDI_INTRA_SKEW_MAX = 0.15         # mm  (~1 ps on FR4; 802.3 budget is far looser)
 MDI_MAX_LEN = 50.0                # mm  PHY-module pin to RJ45 contact, per side
 

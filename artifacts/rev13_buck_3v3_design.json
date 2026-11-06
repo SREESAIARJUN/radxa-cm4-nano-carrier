@@ -1,0 +1,219 @@
+{
+  "vout": {
+    "nom": 3.3149321266968323,
+    "lo": 3.1959476725953135,
+    "hi": 3.437174825174825
+  },
+  "inductor": {
+    "L_rule_uH": 1.527290157274187,
+    "L_uH": 2.2,
+    "di_nom_mA": 555.3782390087953,
+    "di_wc_mA": 935.3501668680001,
+    "di_min_mA": 316.1318844499714,
+    "ripple_ratio": 0.2776891195043976,
+    "ipk_wc": 2.467675083434,
+    "irms": 2.018144360847773
+  },
+  "duty": {
+    "d_max": 0.772956120517634,
+    "ton_min_ns": 502.26244343891403,
+    "vin_dropout": 3.7099321266968324
+  },
+  "cin": {
+    "i_rms": 0.9453791306245238,
+    "i_rms_wc": 1.0,
+    "c_eff_uF": 7.300000000000001,
+    "dvin_mV": 86.38968155123433
+  },
+  "cout": {
+    "c_eff_uF": 18.4,
+    "dvo_mV": 9.8135516148841,
+    "step_under_mV": 49.99006093673957,
+    "step_over_mV": 21.64120642381512,
+    "f_lc_kHz": 22.374063855517168
+  },
+  "ff": {
+    "fz_kHz": 33.86275384933944,
+    "fp_kHz": 187.0878843893369,
+    "boost_kHz": 79.59466676398482,
+    "phase_deg": 43.90631774909978,
+    "ds_boost_kHz": 62.65101084338546
+  },
+  "en": {
+    "v_en": 3.267326732673267
+  },
+  "inrush_mA": 121.5475113122172,
+  "thermal": {
+    "p_ic_W": 0.5943016213569638,
+    "p_ext_W": 0.15692807158159516,
+    "eff": 0.8982224452905309,
+    "eff_1a": 0.9405106086642304,
+    "tj": {
+      "25": [
+        126.03127563068385,
+        93.34468645605084
+      ],
+      "50": [
+        151.03127563068387,
+        118.34468645605084
+      ],
+      "70": [
+        171.03127563068387,
+        138.34468645605085
+      ],
+      "85": [
+        186.03127563068387,
+        153.34468645605085
+      ]
+    },
+    "derate": {
+      "25": [
+        1.9891272298797353,
+        2.0
+      ],
+      "40": [
+        1.823953713533579,
+        2.0
+      ],
+      "50": [
+        1.7053408433966255,
+        2.0
+      ],
+      "60": [
+        1.5782354626433777,
+        1.947340040761698
+      ],
+      "70": [
+        1.440501081606645,
+        1.78100218688092
+      ],
+      "85": [
+        1.20641764706143,
+        1.498853973978293
+      ]
+    }
+  },
+  "corners": 36,
+  "checks": [
+    {
+      "name": "Vout setpoint within 1 % of 3.300 V",
+      "ok": true,
+      "detail": "0.6 x (1 + 100k/22.1k) = 3.3149 V"
+    },
+    {
+      "name": "Vout DC worst case (VREF +/-2 %, R +/-1 %) inside 3.3 V +/-5 %",
+      "ok": true,
+      "detail": "3.196 .. 3.437 V (window 3.135 .. 3.465)"
+    },
+    {
+      "name": "Divider resistors inside datasheet 10k..1M range",
+      "ok": true,
+      "detail": "R1 100k, R2 22.1k, I_div 27.1 uA"
+    },
+    {
+      "name": "Datasheet L rule: L >= Vout(1-Vout/Vin,max)/(fsw*0.4*Iout)",
+      "ok": true,
+      "detail": "L_rule 1.53 uH -> 2.2 uH (FNR4030S2R2MT, also the datasheet's own typical value)"
+    },
+    {
+      "name": "Ripple ratio at nominal L/fsw, VIN,max in 20%..40%",
+      "ok": true,
+      "detail": "dI = 555 mA p-p = 27.8 % of 2.0 A"
+    },
+    {
+      "name": "Worst-corner peak current < Isat (L -20 %, fsw -20 %, VIN 5.5 V)",
+      "ok": true,
+      "detail": "Ipk 2.47 A vs Isat 5.8 A (dI_wc 935 mA)"
+    },
+    {
+      "name": "Isat > IC current limit (no saturation during OCP / hic-cup)",
+      "ok": true,
+      "detail": "Isat 5.8 A > ILIM,min 3.5 A (ILIM max not specified -> 66 % headroom)"
+    },
+    {
+      "name": "Inductor RMS current < Irms rating",
+      "ok": true,
+      "detail": "2.018 A vs 3.2 A"
+    },
+    {
+      "name": "Inductor DCR < 50 mOhm (datasheet efficiency guideline)",
+      "ok": true,
+      "detail": "39 mOhm"
+    },
+    {
+      "name": "Ripple stays >= 10 % at the low corner (current-mode ramp / light-load PFM entry)",
+      "ok": true,
+      "detail": "dI_min 316 mA (15.8 %) at VIN 4.75 V, L +20 %, fsw +20 %"
+    },
+    {
+      "name": "Min on-time margin (D_min / fsw,max >> 75 ns)",
+      "ok": true,
+      "detail": "ton = 502 ns at VIN 5.5 V, fsw +20 % (limit 75 ns)"
+    },
+    {
+      "name": "Regulation headroom at 2 A (100 % duty dropout) below VIN,min",
+      "ok": true,
+      "detail": "VIN needed 3.71 V vs USB VIN,min 4.75 V (D_max 77.3 %)"
+    },
+    {
+      "name": "Cin RMS ripple current handled by 22 uF X5R (self-heating < 10 mW)",
+      "ok": true,
+      "detail": "I_rms 0.945 A (worst VIN=2Vout bound 1.00 A), P_ESR 4.0 mW"
+    },
+    {
+      "name": "Input ripple at IN pin within budget (C -20 %, fsw -20 %, DC-bias derated)",
+      "ok": true,
+      "detail": "dVin 86.4 mV p-p (C_eff 7.3 uF) vs 100 mV"
+    },
+    {
+      "name": "Output ripple (worst corner) < 1 % Vout",
+      "ok": true,
+      "detail": "dVout 9.81 mV p-p (C_eff 18.4 uF)"
+    },
+    {
+      "name": "1 A load-step LC energy deviation (inductor slew bound) < 3 % Vout",
+      "ok": true,
+      "detail": "undershoot 50.0 mV, overshoot 21.6 mV (lower bound; loop-delay term measured on the bench)"
+    },
+    {
+      "name": "Cff phase-boost centre within 0.5x..2x of the datasheet-validated network",
+      "ok": true,
+      "detail": "zero 33.9 kHz, pole 187 kHz, max boost 44 deg at 80 kHz (datasheet 1.8 V example: 63 kHz); LC pole 22.4 kHz"
+    },
+    {
+      "name": "Same L / Cout as datasheet typical application (internal compensation validated region)",
+      "ok": true,
+      "detail": "2.2 uH, 2 x 22 uF"
+    },
+    {
+      "name": "Soft-start Cout charge current << ILIM",
+      "ok": true,
+      "detail": "122 mA over 1.2 ms"
+    },
+    {
+      "name": "EN high level from +3V3_OUT >= VIH 1.5 V and <= VIN + 0.6 V",
+      "ok": true,
+      "detail": "V_EN 3.27 V"
+    },
+    {
+      "name": "EN clamp current limited if +5V_IN collapses first (10k series)",
+      "ok": true,
+      "detail": "<= 0.29 mA into EN ESD diode with VIN = 0"
+    },
+    {
+      "name": "Efficiency at 2 A / 5 V >= 88 %",
+      "ok": true,
+      "detail": "89.8 % (1 A: 94.1 %), P_IC 594 mW, P_L+div 157 mW"
+    },
+    {
+      "name": "TJ <= 125 C at 2 A, TA 50 C (board-estimated thetaJA)",
+      "ok": true,
+      "detail": "TJ 118 C @ 115 C/W (151 C @ datasheet 170 C/W)"
+    },
+    {
+      "name": "Carrier 3V3 load budget 1.2 A <= derated limit at TA 70 C (datasheet thetaJA, conservative)",
+      "ok": true,
+      "detail": "I_max(70 C) = 1.44 A @170 C/W, 1.78 A @115 C/W"
+    }
+  ]
+}
