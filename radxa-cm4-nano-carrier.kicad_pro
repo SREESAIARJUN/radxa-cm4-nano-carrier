@@ -244,23 +244,6 @@
       },
       {
         "bus_width": 12,
-        "clearance": 0.2,
-        "diff_pair_gap": 0.125,
-        "diff_pair_via_gap": 0.15,
-        "diff_pair_width": 0.165,
-        "line_style": 0,
-        "microvia_diameter": 0.3,
-        "microvia_drill": 0.1,
-        "name": "ETH_MDI_100R",
-        "pcb_color": "rgb(0, 194, 194)",
-        "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.165,
-        "via_diameter": 0.5,
-        "via_drill": 0.3,
-        "wire_width": 6
-      },
-      {
-        "bus_width": 12,
         "clearance": 0.12,
         "diff_pair_gap": 0.125,
         "diff_pair_via_gap": 0.1,
@@ -272,23 +255,6 @@
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 0.165,
-        "via_diameter": 0.5,
-        "via_drill": 0.3,
-        "wire_width": 6
-      },
-      {
-        "bus_width": 12,
-        "clearance": 0.2,
-        "diff_pair_gap": 0.25,
-        "diff_pair_via_gap": 0.25,
-        "diff_pair_width": 0.2,
-        "line_style": 0,
-        "microvia_diameter": 0.3,
-        "microvia_drill": 0.1,
-        "name": "BUCK_POWER",
-        "pcb_color": "rgba(0, 0, 0, 0.000)",
-        "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 1.0,
         "via_diameter": 0.5,
         "via_drill": 0.3,
         "wire_width": 6
@@ -331,26 +297,6 @@
       {
         "netclass": "HDMI_TMDS",
         "pattern": "HDMI0_CLK_N"
-      },
-      {
-        "netclass": "ETH_MDI_100R",
-        "pattern": "Ethernet_Pair*"
-      },
-      {
-        "netclass": "ETH_MDI_100R",
-        "pattern": "ETH_MDI*"
-      },
-      {
-        "netclass": "BUCK_POWER",
-        "pattern": "+5V_IN"
-      },
-      {
-        "netclass": "BUCK_POWER",
-        "pattern": "+3V3_SYS"
-      },
-      {
-        "netclass": "BUCK_POWER",
-        "pattern": "BUCK_LX"
       }
     ]
   },

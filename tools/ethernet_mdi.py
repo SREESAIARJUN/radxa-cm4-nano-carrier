@@ -76,6 +76,7 @@ S = Z.MDI_S                  # 0.125
 PITCH = W + S                # 0.290 centre-to-centre
 HP = PITCH / 2
 VIA_D, VIA_DRILL = 0.50, 0.30          # project minimums (.kicad_pro: via 0.50 / drill 0.30, annulus 0.10)
+VIA_LEN = round(2 * Z.STACKUP.h_pp + Z.STACKUP.h_core + 2 * Z.STACKUP.t_inner + Z.STACKUP.t_outer, 4)  # F.Cu->B.Cu barrel, as KiCad counts it (1.5512)
 VIA_PITCH = 0.65                       # MDI via-pair pitch -> 0.15 mm P-N via gap (netclass clearance 0.12)
 GROUP = "REV9_ETH_MDI"                 # every item this stage adds is a member (idempotent re-runs, DRC attribution)
 CHAMFER = 0.6                          # centreline 45-degree corner cut
@@ -350,19 +351,21 @@ def build_plan(pads, pads_net=None) -> Plan:
 
     t1_e = T("1")[0]                      # PHY pad-row x (pad centres)
     x_entry = t1_e + 0.952 + 0.55         # coupled section ends here, then fans into pads
-    # South-drop centrelines (ch1..ch4): 0.95 mm pitch (0.495 mm edge gap), 1.2 mm
-    # between ch2 and ch3 so ch3 clears ch2's corner-via antipads on In2.  The
+    # South-drop centrelines (ch1..ch4): 1.15 mm ch1-ch2 (ch2's corner vias clear
+    # ch1's drop by 0.35 mm), 1.25 mm ch2-ch3 (ch3 stays over In2 copper outside
+    # ch2's via antipads), 0.95 mm ch3-ch4 (0.495 mm edge gap).  The
     # corridor lies between T1 (x <= 42.6) and the Rev 13 buck U5/L1 (x >= 47.85).
-    XV = {3: x_entry + 0.60, 1: x_entry + 1.55, 2: x_entry + 2.75, 0: x_entry + 3.70}
+    XV = {3: x_entry + 0.60, 1: x_entry + 1.75, 2: x_entry + 3.00, 0: x_entry + 3.95}
 
     def t1_tail(n):
         """Fan-in heading WEST: P -> south (TD-) pad, N -> north (TD+) pad."""
         pp, nn = T(PAIRS[n]["td"][0]), T(PAIRS[n]["td"][1])
         assert pp[1] > nn[1], "P must land on the south (TD-) pad"
         yc = (pp[1] + nn[1]) / 2
-        k = (pp[1] - nn[1]) / 2 - HP
-        tp = [(x_entry, yc + HP), (x_entry - k, pp[1]), pp]
-        tn = [(x_entry, yc - HP), (x_entry - k, nn[1]), nn]
+        # single diverging diagonals (never parallel -> not mistaken for a
+        # badly-coupled pair by KiCad's diff-pair gap check)
+        tp = [(x_entry, yc + HP), pp]
+        tn = [(x_entry, yc - HP), nn]
         return yc, tp, tn
 
     def twist(xc, y0):
@@ -373,8 +376,8 @@ def build_plan(pads, pads_net=None) -> Plan:
         vP = (xc + 0.70, y0 + 1.05)
         fP = [(xc - HP, y0), (xc - HP, y0 + 0.85), (xc + 0.05, y0 + 1.05), vP]
         fN = [(xc + HP, y0), vN]
-        bN = [vN, (xc - HP, y0 + 0.645)]
-        bP = [vP, (xc + HP, y0 + 1.605)]
+        bN = [vN, (xc - HP, y0 + 0.95)]                 # ~58 deg
+        bP = [vP, (xc + HP, y0 + 1.605)]                # 45 deg (never parallel to bN)
         return vP, vN, fP, fN, bP, bN, y0 + 1.65
 
     # ---- Pair 3 (ch1): outer row, P (34.4) east / N (34.0) west.  F.Cu south
@@ -400,7 +403,7 @@ def build_plan(pads, pads_net=None) -> Plan:
     #      south drop (P east), west entry (P south).  No twist.
     p2p, p2n = j1_pad(11), j1_pad(9)
     vP2, vN2 = (32.55, 2.45), (33.25, 3.50)
-    fP = [p2p, vP2]
+    fP = [p2p, (p2p[0], 2.05), vP2]
     fN = [p2n, (p2n[0], 2.30), vN2]
     xd = XV[2]
     yc, tp, tn = t1_tail(2)
@@ -416,12 +419,12 @@ def build_plan(pads, pads_net=None) -> Plan:
     #      by-side vias -> B.Cu drop.  No twist.
     p1p, p1n = j1_pad(4), j1_pad(6)
     xd = XV[1]
-    pc, nc = coupled([(34.20, 5.25), (34.20, 6.40), (xd, 6.40), (xd, 7.00)], p_side=+1)
-    vP1, vN1 = (xd + VIA_PITCH / 2, 7.35), (xd - VIA_PITCH / 2, 7.35)
+    pc, nc = coupled([(34.20, 5.25), (34.20, 6.40), (xd, 6.40), (xd, 6.85)], p_side=+1)
+    vP1, vN1 = (xd + VIA_PITCH / 2, 7.20), (xd - VIA_PITCH / 2, 7.20)
     fP = [p1p] + pc + [vP1]
     fN = [p1n] + nc + [vN1]
     yc, tp, tn = t1_tail(1)
-    pc, nc = coupled([(xd, 7.95), (xd, yc), (x_entry, yc)], p_side=+1)
+    pc, nc = coupled([(xd, 7.80), (xd, yc), (x_entry, yc)], p_side=+1)
     pB = [vP1] + pc + tp[1:]
     nB = [vN1] + nc + tn[1:]
     P.pair("PHY1", phy_net(1, "P"), phy_net(1, "N"), [("F.Cu", fP, fN), ("B.Cu", pB, nB)],
@@ -458,8 +461,8 @@ def build_plan(pads, pads_net=None) -> Plan:
         center = [(xs, yt), (xm + abs(dy) / 2, yt), (xm - abs(dy) / 2, yj), (xe, yj)]
         up = offset(center, -HP)            # heading W: north = right of travel
         lo = offset(center, +HP)
-        fu = [up_t, (t_end, up_t[1])] + up + [(j_end, up_j[1]), up_j]
-        fl = [lo_t, (t_end, lo_t[1])] + lo + [(j_end, lo_j[1]), lo_j]
+        fu = [up_t] + up + [up_j]          # diverging diagonals into the pads
+        fl = [lo_t] + lo + [lo_j]
         return fu, fl
 
     def mxP(n):
@@ -468,7 +471,7 @@ def build_plan(pads, pads_net=None) -> Plan:
     def mxN(n):
         return T(PAIRS[n]["mx"][1])
 
-    for n in (3, 2, 0):                     # D, C, A: straight across with a jog
+    for n in (3, 0):                        # D, A: straight across with one 45-degree jog
         p_t, n_t = mxP(n), mxN(n)
         p_j, n_j = R(PAIRS[n]["rj"][0]), R(PAIRS[n]["rj"][1])
         assert (p_t[1] > n_t[1]) == (p_j[1] > n_j[1]), f"pair {n}: cable-side order would cross"
@@ -478,16 +481,41 @@ def build_plan(pads, pads_net=None) -> Plan:
             pl, nl = cable(p_t, n_t, p_j, n_j)
         P.pair(f"CAB{n}", cab_net(n, "P"), cab_net(n, "N"), [("B.Cu", pl, nl)])
 
-    # Pair 1 (B): MX2+ -> pin 6 (B-) is a straight B.Cu run; MX2- -> pin 3 (B+)
-    # must cross pair C (the T568 3/6 straddle) -> one F.Cu hop.
+    # Pair B (CM4 Pair1, ch2): MX2+ -> pin 6 (B-) straight; MX2- -> pin 3 (B+)
+    # runs diagonally under pair C (the T568 3/6 straddle).  Both legs stay on
+    # B.Cu with no vias.
     n_t, p_t = mxN(1), mxP(1)
     n_j, p_j = R(PAIRS[1]["rj"][1]), R(PAIRS[1]["rj"][0])
     assert abs(n_t[1] - n_j[1]) < 1e-6
-    vt, vj = (tx - 1.85, p_t[1]), (jx + 2.55, p_j[1])
-    nl = [n_t, n_j]
     P.pair("CAB1", cab_net(1, "P"), cab_net(1, "N"),
-           [("B.Cu", [p_t, vt], nl), ("F.Cu", [vt, vj], []), ("B.Cu", [vj, p_j], [])],
-           vias=[(*vt, cab_net(1, "P")), (*vj, cab_net(1, "P"))])
+           [("B.Cu", [p_t, (t_end, p_t[1]), (j_end, p_j[1]), p_j], [n_t, n_j])])
+
+    # Pair C (CM4 Pair2, ch3): both legs hop to F.Cu over B's diagonal leg
+    # (stacked via pairs at both ends -> equal via count per leg) and jog up
+    # 2.54 mm to RJ45 pins 5/4.  In1 under the hop is the ETH_SHIELD island.
+    up_t, lo_t = (mxN(2), mxP(2)) if mxN(2)[1] < mxP(2)[1] else (mxP(2), mxN(2))
+    up_j, lo_j = (R(PAIRS[2]["rj"][1]), R(PAIRS[2]["rj"][0])) if R(PAIRS[2]["rj"][1])[1] < R(PAIRS[2]["rj"][0])[1] \
+        else (R(PAIRS[2]["rj"][0]), R(PAIRS[2]["rj"][1]))
+    yt, yj = (up_t[1] + lo_t[1]) / 2, (up_j[1] + lo_j[1]) / 2
+    xv_t, xv_j = tx - 1.85, jx + 2.55
+    vtu, vtl = (xv_t, yt - VIA_PITCH / 2), (xv_t, yt + VIA_PITCH / 2)
+    vju, vjl = (xv_j, yj - VIA_PITCH / 2), (xv_j, yj + VIA_PITCH / 2)
+    # steep (~57 deg) coupled jog, built as a true perpendicular offset of the
+    # centreline (heading west: north leg = right of travel)
+    cF = [(xv_t - 0.30, yt), (xv_t - 0.55, yt), (xv_j + 0.55, yj), (xv_j + 0.30, yj)]
+    cu, cl = offset(cF, -HP), offset(cF, +HP)
+    fu = [vtu] + cu + [vju]
+    fl = [vtl] + cl + [vjl]
+    bu1, bl1 = [up_t, vtu], [lo_t, vtl]
+    bu2, bl2 = [vju, up_j], [vjl, lo_j]
+    up_is_p = up_t == mxP(2)
+    assert up_is_p == (up_j == R(PAIRS[2]["rj"][0])), "pair C polarity"
+    legs = [("B.Cu", bu1, bl1), ("F.Cu", fu, fl), ("B.Cu", bu2, bl2)]
+    if not up_is_p:
+        legs = [(ly, b_, a_) for ly, a_, b_ in legs]
+    P.pair("CAB2", cab_net(2, "P"), cab_net(2, "N"), legs,
+           vias=[(*vtu, cab_net(2, "P" if up_is_p else "N")), (*vtl, cab_net(2, "N" if up_is_p else "P")),
+                 (*vju, cab_net(2, "P" if up_is_p else "N")), (*vjl, cab_net(2, "N" if up_is_p else "P"))])
 
     def role(ref, netname):
         return [v for (r, _), v in pads_net.items() if r == ref and _ == netname][0]
@@ -541,16 +569,15 @@ def build_plan(pads, pads_net=None) -> Plan:
     # ---------------- Return-path stitching ---------------------------------
     # GND In1<->In2 next to every PHY-side layer transition and along the run
     x3, x0 = XV[3], XV[0]
-    gv = [(35.30, 1.00), (35.30, 4.85), (31.90, 3.00), (31.90, 6.00), (37.0, 4.75), (41.0, 4.75),
+    gv = [(35.30, 1.00), (35.30, 4.30), (31.90, 3.00), (31.90, 6.00), (37.0, 4.75), (41.0, 4.75),
           (x3 - 0.95, 4.60), (37.0, 9.30), (41.0, 9.30), (x3 - 1.0, 10.0),
-          (x0 + 0.85, 11.0), (x0 + 0.85, 16.0), (x0 + 0.85, 21.0), (x0 + 0.85, 26.0), (x0 - 0.95, 27.4)]
+          (x0 + 0.80, 11.0), (x0 + 0.80, 16.0), (x0 + 0.80, 21.0), (x0 + 0.80, 26.0), (x0 - 0.95, 27.4)]
     for x, y in gv:
         P.via(x, y, "GND")
-    P.track("F.Cu", "GND", [j1_pad(1), (35.30, 1.00)])
-    P.track("F.Cu", "GND", [j1_pad(2), (j1_pad(2)[0], 4.85), (35.30, 4.85)])
+    P.track("F.Cu", "GND", [(j1_pad(1)[0], 1.20), (35.30, 1.00)])          # from pad 1's outboard end
+    P.track("F.Cu", "GND", [(j1_pad(2)[0], 4.30), (35.30, 4.30)])          # from pad 2's inboard end
     # ETH_SHIELD In1<->In2 stitching around the B hop and the jack field
-    for x, y in [(tx - 1.85, 20.65), (tx - 1.80, 13.0), (jx + 2.55, 23.05), (tx - 1.80, 27.6),
-                 (jx + 2.30, 12.9), (jx + 2.30, 27.2)]:
+    for x, y in [(tx - 1.85, 21.25), (tx - 1.80, 13.0), (tx - 1.80, 27.9), (jx + 2.30, 12.9), (jx + 2.30, 27.4)]:
         P.via(x, y, "ETH_SHIELD")
     return P
 
@@ -776,8 +803,10 @@ def generate_board():
     #     straight run, bulging away from its partner.
     for name, pr in plan.pairs.items():
         legs = pr["legs"]
-        lp = sum(plen(pp) for _, pp, _ in legs)
-        ln = sum(plen(nn) for _, _, nn in legs)
+        nvp = sum(1 for v in plan.vias if v[2] == pr["P"])
+        nvn = sum(1 for v in plan.vias if v[2] == pr["N"])
+        lp = sum(plen(pp) for _, pp, _ in legs) + nvp * VIA_LEN       # KiCad-consistent: via barrels count
+        ln = sum(plen(nn) for _, _, nn in legs) + nvn * VIA_LEN
         if abs(lp - ln) <= 0.01:
             continue
         short_is_p = lp < ln
@@ -810,7 +839,7 @@ def generate_board():
     layer_id = {"F.Cu": pcbnew.F_Cu, "B.Cu": pcbnew.B_Cu}
     for layer, netname, pts in plan.tracks:
         w = W if netname.startswith(("Ethernet_Pair", "ETH_MDI")) else 0.25
-        if netname == "GND" and layer == "F.Cu" and any(abs(p[1] - 1.5) < 0.01 or abs(p[1] - 4.58) < 0.01 for p in pts):
+        if netname == "GND" and layer == "F.Cu" and any(1.1 < p[1] < 1.9 or 4.2 < p[1] < 4.95 for p in pts):
             w = 0.18                      # DF40 GND pad tie (0.2 mm pad)
         for a, b in zip(pts, pts[1:]):
             if math.dist(a, b) < 1e-4:
@@ -1070,7 +1099,6 @@ def cmd_verify(_a=None) -> int:
     C.add("GEO-width", f"every MDI segment is {W} mm wide", widths == [W], f"{widths}")
 
     # --- 3. connectivity / mapping / polarity from the copper itself
-    conn = board.GetConnectivity()
     def pad_net(ref, num):
         return [p for p in fps[ref].Pads() if p.GetNumber() == num][0].GetNetname()
     mapping_ok, pol_ok, det = True, True, []
@@ -1095,19 +1123,12 @@ def cmd_verify(_a=None) -> int:
     j1ok = all(pad_net("J1", str(p)) == M.CM4_PINS[p] for p in range(3, 13))
     C.add("MAP-j1", "J1 pins 3..12 carry Ethernet_Pair0..3 per CM4 pinout", j1ok)
 
-    unrouted = []
-    for netname in mdi_nets + [f"ETH_TCT{i}" for i in range(1, 5)] + [f"ETH_MCT{i}" for i in range(1, 5)] + ["ETH_BS"]:
-        code = board.GetNetcodeFromNetname(netname)
-        if conn.GetUnconnectedCount(False) is None:
-            pass
-        n_unc = sum(1 for _ in conn.GetNetItems(code, [pcbnew.PCB_PAD_T])) if False else 0
-        unrouted.append((netname, n_unc))
-    # authoritative unconnected check from DRC below
+    # (unrouted connections: authoritative check from kicad-cli DRC below)
 
     # --- 4. lengths and skew
     def net_len(n):
-        L = sum(tm(t.GetLength()) for t in tracks.get(n, []))
-        return L
+        """Track length + one F.Cu->B.Cu barrel per via (what KiCad's skew rule measures)."""
+        return sum(tm(t.GetLength()) for t in tracks.get(n, [])) + VIA_LEN * len(vias.get(n, []))
     skew_rows, len_rows = [], []
     for side, fn in (("PHY", phy_net), ("CAB", cab_net)):
         for n in range(4):
@@ -1171,15 +1192,20 @@ def cmd_verify(_a=None) -> int:
                         worst_ip = (g, f"{a}/{b}")
     C.add("SPC-interpair", f"pair-to-pair edge spacing >= {MDI_CLR} mm (DRU mdi_interpair)", worst_ip[0] >= MDI_CLR - 1e-3,
           f"min {worst_ip[0]:.3f} mm ({worst_ip[1]})")
-    pg = []
-    for n in mdi_nets:
-        ss = [s for s in segs(n)]
-        gap = []
-        for s1 in ss:
-            for s2 in ss:
-                pass
-    # coupled gap = PITCH - W on straight coupled runs (spot check via unc metric)
-    C.add("GEO-gap", f"coupled edge gap {S} mm (centre pitch {PITCH:.3f})", abs(PITCH - W - S) < 1e-9, f"{PITCH - W:.3f} mm")
+    # intra-pair pinch check: minimum P-N edge gap over every same-layer
+    # segment pair must never fall below the coupled gap S (catches shorts /
+    # pinches such as a mis-offset jog)
+    pinch = (99.0, "")
+    for side, fn in (("PHY", phy_net), ("CAB", cab_net)):
+        for n in range(4):
+            for s1 in segs(fn(n, "P")):
+                for s2 in segs(fn(n, "N")):
+                    if s1[2] == s2[2]:
+                        g = segseg(s1[0], s1[1], s2[0], s2[1]) - W
+                        if g < pinch[0]:
+                            pinch = (g, f"{side}{n}")
+    C.add("GEO-gap", f"no intra-pair pinch: min P-N edge gap >= coupled gap {S} mm (centre pitch {PITCH:.3f})",
+          pinch[0] >= S - 0.005, f"min {pinch[0]:.3f} mm ({pinch[1]})")
 
     # --- 7. reference planes under every MDI segment
     zones = {(z.GetLayer(), z.GetNetname()): z for z in board.Zones()}
@@ -1238,11 +1264,36 @@ def cmd_verify(_a=None) -> int:
         C.add("DRC-other", "pre-existing non-Ethernet DRC items (informational)", True,
               f"{len(other)} violations, {len(dr.get('unconnected_items', [])) - len(unc_eth)} unrouted (J1/J2 module nets / other stages)")
         mutation_tests(C)
+        check_schematic(C)
     else:
         C.add("DRC-cli", "kicad-cli available", False, "not on PATH")
     write_report(C, skew_rows, unc, d)
     print(f"\n{'PASS' if C.ok else 'FAIL'}: {sum(r[2] for r in C.rows)}/{len(C.rows)} -> {REPORT.relative_to(ROOT)}")
     return 0 if C.ok else 1
+
+
+def check_schematic(C):
+    """ERC of the root schematic (Rev 9 symbols) + PCB<->schematic parity for
+    every Rev 9 reference."""
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "erc.json"
+        subprocess.run(["kicad-cli", "sch", "erc", "--format", "json", "--severity-all", "-o", str(out), str(SCH)],
+                       check=True, capture_output=True, text=True)
+        erc = json.loads(out.read_text())
+        out2 = Path(td) / "par.json"
+        subprocess.run(["kicad-cli", "pcb", "drc", "--format", "json", "--schematic-parity", "-o", str(out2), str(PCB)],
+                       check=True, capture_output=True, text=True)
+        par = json.loads(out2.read_text()).get("schematic_parity", [])
+    v = [x for sh in erc.get("sheets", []) for x in sh.get("violations", [])]
+    # expected: PHY-side Ethernet_PairN labels have no J1 symbol to meet yet
+    unexpected = [x for x in v if not (x["type"] == "global_label_dangling" and
+                                       any("Ethernet_Pair" in i["description"] for i in x["items"]))]
+    C.add("SCH-erc", "schematic ERC: no violations on Rev 9 symbols (only the 8 J1-side Ethernet_PairN labels dangle)",
+          not unexpected and len(v) - len(unexpected) <= 8,
+          f"{len(v)} total; unexpected: {[x['type'] for x in unexpected][:6] or 'none'}")
+    mine = [p_ for p_ in par if any(re.search(r"\b(" + "|".join(sorted(OUR_REFS)) + r")\b", i["description"]) for i in p_["items"])]
+    C.add("SCH-parity", "schematic <-> PCB parity clean for T1, J3, C10..C15, R10..R14 (refs, values, footprints, nets)",
+          not mine, f"{len(mine)} Rev 9 parity items ({len(par)} board-wide, J1/J2/other stages)")
 
 
 def mutation_tests(C):
@@ -1303,7 +1354,7 @@ def write_report(C, skew_rows, unc, d):
          f"| Kirschning-Jansen closed form, bare | {cf['zdiff']:.2f} | {cf['zodd']:.2f} | {cf['zcomm']:.2f} |", "",
          f"Geometry W = {W} mm, S = {S} mm, pitch {PITCH:.3f} mm; eeff(odd) {fd['eeff_odd']:.3f} -> "
          f"{math.sqrt(fd['eeff_odd']) / Z.C0 * 1e9:.3f} ps/mm.", "",
-         "## Intra-pair lengths (track only; every pair has identical via count)", "",
+         "## Intra-pair lengths (track + one 1.5512 mm F.Cu->B.Cu barrel per via, as KiCad's skew rule counts them)", "",
          "| Segment | P (mm) | N (mm) | Skew (mm) | Uncoupled (mm, P leg) |", "|---|---|---|---|---|"]
     for k, lp, ln, dd in skew_rows:
         L.append(f"| {k} | {lp:.3f} | {ln:.3f} | {dd:.3f} | {unc.get(k, 0):.2f} |")
@@ -1364,17 +1415,215 @@ def cmd_render(_a=None) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# 9. Schematic (idempotent): Ethernet front-end symbols + global labels
+# ---------------------------------------------------------------------------
+SCH = ROOT / "radxa-cm4-nano-carrier.kicad_sch"
+SYMLIB = ROOT / "lib" / "CM4Carrier.kicad_sym"
+UUID_NS = "e7e90009"                      # every Rev 9 schematic item uuid starts with this
+
+
+def _uid(tag: str) -> str:
+    import hashlib
+    h = hashlib.sha1(tag.encode()).hexdigest()
+    return f"{UUID_NS}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
+
+
+def _top_level(body: str) -> list[str]:
+    """Split the inside of an s-expression into its top-level child strings."""
+    out, depth, start, i, n, instr = [], 0, None, 0, len(body), False
+    while i < n:
+        c = body[i]
+        if instr:
+            if c == "\\\\":
+                i += 2
+                continue
+            if c == '"':
+                instr = False
+        elif c == '"':
+            instr = True
+        elif c == "(":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                out.append(body[start:i + 1])
+        i += 1
+    return out
+
+
+def _sym_def(name, desc, fp, ref, pins_left, pins_right, w=7.62, kw=""):
+    """Rectangle symbol; pins_* = [(number, name, type)] top->bottom, 2.54 pitch."""
+    n = max(len(pins_left), len(pins_right))
+    top = 1.27 * (n - 1)
+    L = [f'    (symbol "CM4Carrier:{name}"', '      (pin_names (offset 0.762))', '      (exclude_from_sim no) (in_bom yes) (on_board yes)',
+         f'      (property "Reference" "{ref}" (at 0 {top + 3.81:.2f} 0) (effects (font (size 1.27 1.27))))',
+         f'      (property "Value" "{name}" (at 0 {-top - 3.81:.2f} 0) (effects (font (size 1.27 1.27))))',
+         f'      (property "Footprint" "{fp}" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+         '      (property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+         f'      (property "Description" "{desc}" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+         f'      (property "ki_keywords" "{kw}" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+         f'      (symbol "{name}_0_1"',
+         f'        (rectangle (start {-w:.2f} {top + 1.27:.2f}) (end {w:.2f} {-top - 1.27:.2f}) (stroke (width 0.254) (type default)) (fill (type background)))',
+         '      )', f'      (symbol "{name}_1_1"']
+    for side, pins in ((-1, pins_left), (1, pins_right)):
+        for k, (num, pname, typ) in enumerate(pins):
+            y = top - 2.54 * k
+            x = side * (w + 2.54)
+            ang = 0 if side < 0 else 180
+            L.append(f'        (pin {typ} line (at {x:.2f} {y:.2f} {ang}) (length 2.54) (name "{pname}" (effects (font (size 1.016 1.016)))) '
+                     f'(number "{num}" (effects (font (size 1.016 1.016)))))')
+    L += ['      )', '    )']
+    return "\n".join(L)
+
+
+def _two_pin(name, ref, desc, fp):
+    return "\n".join([
+        f'    (symbol "CM4Carrier:{name}"', '      (pin_numbers hide) (pin_names (offset 0) hide)',
+        '      (exclude_from_sim no) (in_bom yes) (on_board yes)',
+        f'      (property "Reference" "{ref}" (at 2.54 1.27 0) (effects (font (size 1.27 1.27)) (justify left)))',
+        f'      (property "Value" "{name}" (at 2.54 -1.27 0) (effects (font (size 1.27 1.27)) (justify left)))',
+        f'      (property "Footprint" "{fp}" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+        '      (property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+        f'      (property "Description" "{desc}" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))',
+        f'      (symbol "{name}_0_1"',
+        '        (rectangle (start -1.016 2.286) (end 1.016 -2.286) (stroke (width 0.254) (type default)) (fill (type none)))',
+        '      )', f'      (symbol "{name}_1_1"',
+        '        (pin passive line (at 0 3.81 270) (length 1.524) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))',
+        '        (pin passive line (at 0 -3.81 90) (length 1.524) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))',
+        '      )', '    )'])
+
+
+def eth_symbols():
+    t1_l = [(str(n), nm, "passive") for n, nm in zip(range(1, 13), ["TCT1", "TD1+", "TD1-", "TCT2", "TD2+", "TD2-",
+                                                                   "TCT3", "TD3+", "TD3-", "TCT4", "TD4+", "TD4-"])]
+    t1_r = [(str(n), nm, "passive") for n, nm in zip(range(24, 12, -1), ["MCT1", "MX1+", "MX1-", "MCT2", "MX2+", "MX2-",
+                                                                        "MCT3", "MX3+", "MX3-", "MCT4", "MX4+", "MX4-"])]
+    j3_l = [(str(n), f"P{n}", "passive") for n in range(1, 9)] + [("M1", "SHIELD", "passive"), ("M2", "SHIELD", "passive")]
+    return {
+        "H5007NL": _sym_def("H5007NL", "Pulse H5007NL 1000BASE-T magnetics, 1CT:1CT, 1500 Vrms (LCSC C6384935)",
+                            f"{LIBNAME}:Pulse_H5007NL_SMD-24_P1.27mm", "T", t1_l, t1_r, 10.16, "ethernet transformer"),
+        "RJE231881317T": _sym_def("RJE231881317T", "Amphenol RJE231881317T RJ45 8P8C vertical SMT shielded (LCSC C5384839)",
+                                  f"{LIBNAME}:Amphenol_RJE231881317T_RJ45_Vertical_SMD", "J", j3_l, [], 7.62, "RJ45 8P8C"),
+        "C_0402": _two_pin("C_0402", "C", "MLCC 0402", f"{LIBNAME}:C_0402_1005Metric"),
+        "R_0402": _two_pin("R_0402", "R", "Resistor 0402", f"{LIBNAME}:R_0402_1005Metric"),
+        "C_1206_HV": _two_pin("C_1206_HV", "C", "MLCC 1206 2 kV", f"{LIBNAME}:C_1206_3216Metric_HV"),
+        "R_1206": _two_pin("R_1206", "R", "Resistor 1206", f"{LIBNAME}:R_1206_3216Metric"),
+    }
+
+
+def _instance(lib, ref, value, fp, at, sch_uuid, mpn=""):
+    x, y = at
+    u = _uid(f"sym:{ref}")
+    extra = f'\n    (property "MPN" "{mpn}" (at {x} {y} 0) (effects (font (size 1.27 1.27)) (hide yes)))' if mpn else ""
+    return (f'  (symbol\n    (lib_id "CM4Carrier:{lib}")\n    (at {x} {y} 0)\n    (unit 1)\n    (exclude_from_sim no)\n    (in_bom yes)\n'
+            f'    (on_board yes)\n    (dnp no)\n    (uuid "{u}")\n'
+            f'    (property "Reference" "{ref}" (at {x} {y - 2.54:.2f} 0) (effects (font (size 1.27 1.27))))\n'
+            f'    (property "Value" "{value}" (at {x} {y + 2.54:.2f} 0) (effects (font (size 1.27 1.27))))\n'
+            f'    (property "Footprint" "{fp}" (at {x} {y} 0) (effects (font (size 1.27 1.27)) (hide yes)))\n'
+            f'    (property "Datasheet" "~" (at {x} {y} 0) (effects (font (size 1.27 1.27)) (hide yes))){extra}\n'
+            f'    (instances\n      (project "radxa-cm4-nano-carrier"\n        (path "/{sch_uuid}" (reference "{ref}") (unit 1))\n      )\n    )\n  )')
+
+
+def _glabel(net, x, y, ang):
+    u = _uid(f"gl:{net}:{x:.2f}:{y:.2f}")
+    j = "right" if ang == 180 else "left"
+    return (f'  (global_label "{net}" (shape bidirectional) (at {x:.2f} {y:.2f} {ang}) (fields_autoplaced yes)\n'
+            f'    (effects (font (size 1.016 1.016)) (justify {j}))\n    (uuid "{u}")\n'
+            f'    (property "Intersheetrefs" "${{INTERSHEET_REFS}}" (at {x:.2f} {y:.2f} 0) (effects (font (size 1.27 1.27)) (hide yes)))\n  )')
+
+
+def cmd_schematic(_a=None) -> int:
+    """Insert/refresh the Rev 9 Ethernet front end in the root schematic.
+    Net names are read back from the generated PCB so schematic and board
+    can never disagree (verified with kicad-cli ERC + PCB parity)."""
+    import pcbnew
+    board = pcbnew.LoadBoard(str(PCB))
+    padnet = {}
+    vals = {}
+    for fp in board.GetFootprints():
+        if fp.GetReference() in OUR_REFS:
+            vals[fp.GetReference()] = (fp.GetValue(), fp.GetFPIDAsString())
+            for p in fp.Pads():
+                padnet[(fp.GetReference(), p.GetNumber())] = p.GetNetname()
+    txt = SCH.read_text()
+    sch_uuid = re.search(r'\(kicad_sch[^(]*\(version[^)]*\)\s*\(generator[^)]*\)\s*\(generator_version[^)]*\)\s*\(uuid "([^"]+)"\)', txt).group(1)
+    head, body = txt[:txt.index("(kicad_sch") + len("(kicad_sch")], txt[txt.index("(kicad_sch") + len("(kicad_sch"):txt.rindex(")")]
+    items = _top_level(body)
+    syms = eth_symbols()
+    keep = []
+    for it in items:
+        if it.startswith("(lib_symbols"):
+            inner = it[len("(lib_symbols"):-1]
+            libs = [s for s in _top_level(inner) if not any(f'"CM4Carrier:{k}"' in s.split("\n", 1)[0] for k in syms)]
+            it = "(lib_symbols\n" + "\n".join("    " + s.strip() if not s.startswith("    ") else s for s in libs) + \
+                 "\n" + "\n".join(syms.values()) + "\n  )"
+        elif UUID_NS in it and it.startswith(("(symbol", "(global_label", "(text")):
+            continue
+        keep.append(it)
+    new = []
+    X0, Y0 = 127.0, 50.8                       # right of the mounting-hole block
+    # T1 at the centre, J3 to its right; passives below
+    t1 = (X0 + 30.48, Y0 + 30.48)
+    j3 = (X0 + 81.28, Y0 + 30.48)
+    lib_of = {"T1": "H5007NL", "J3": "RJE231881317T"}
+    for ref, at in (("T1", t1), ("J3", j3)):
+        new.append(_instance(lib_of[ref], ref, vals[ref][0], vals[ref][1], at, sch_uuid,
+                             T1_MPN if ref == "T1" else J3_MPN))
+    # labels on T1 / J3 pins (symbol y-up -> schematic y-down)
+    for ref, at, w, nleft in (("T1", t1, 10.16, 12), ("J3", j3, 7.62, 10)):
+        d = re.search(r'\(symbol "' + lib_of[ref] + r'_1_1"(.*?)\n      \)', syms[lib_of[ref]], re.S).group(1)
+        for m in re.finditer(r'\(at ([\-\d.]+) ([\-\d.]+) (\d+)\).*?\(number "([^"]+)"', d):
+            px, py, ang, num = float(m.group(1)), float(m.group(2)), int(m.group(3)), m.group(4)
+            net_ = padnet.get((ref, num), "")
+            if net_:
+                new.append(_glabel(net_, at[0] + px, at[1] - py, 180 if ang == 0 else 0))
+    # passives
+    px0 = X0
+    for i, ref in enumerate(sorted(r for r in OUR_REFS if r[0] in "CR")):
+        val, fpid = vals[ref]
+        lib = {"C_0402_1005Metric": "C_0402", "R_0402_1005Metric": "R_0402",
+               "C_1206_3216Metric_HV": "C_1206_HV", "R_1206_3216Metric": "R_1206"}[fpid.split(":")[1]]
+        at = (px0 + 10.16 * (i % 6), Y0 + 76.2 + 22.86 * (i // 6))
+        new.append(_instance(lib, ref, val, fpid, at, sch_uuid))
+        for num, dy, ang in (("1", -3.81, 90), ("2", 3.81, 270)):
+            new.append(_glabel(padnet[(ref, num)], at[0], at[1] + dy, ang))
+    note = ("REV 9 ETHERNET MDI (tools/ethernet_mdi.py schematic): CM4 PHY pairs -> T1 H5007NL -> J3 RJ45 (T568).\\n"
+            "ch1..ch4 = Pair3, Pair1, Pair2, Pair0; P on TDk-/MXk- (both winding ends swapped = polarity kept).\\n"
+            "TCTx: 100 nF each to GND (voltage-mode PHY, never shorted). MCTx: 75R Bob Smith -> 1 nF/2 kV -> ETH_SHIELD.\\n"
+            "ETH_SHIELD = In1/In2 island + J3 shield, 1M || 1 nF/2 kV to GND. 100R diff W0.165/S0.125 (mdi_impedance.py).")
+    new.append(f'  (text "{note}"\n    (exclude_from_sim no)\n    (at {X0} {Y0 - 5.08} 0)\n'
+               f'    (effects (font (size 1.27 1.27)) (justify left bottom))\n    (uuid "{_uid("note")}")\n  )')
+    si = [k for k, it in enumerate(keep) if it.startswith("(sheet_instances")]
+    pos = si[0] if si else len(keep)
+    keep = keep[:pos] + new + keep[pos:]
+    out = head + "\n  " + "\n  ".join(k.strip() if not k.startswith("  ") else k.strip() for k in keep) + "\n)\n"
+    out = re.sub(r'\(rev "[^"]*"\)', '(rev "9.0")', out, count=1)
+    SCH.write_text(out)
+    # keep the project symbol library in sync (same definitions, unprefixed names)
+    lib = SYMLIB.read_text()
+    lb = lib[lib.index("(kicad_symbol_lib") + len("(kicad_symbol_lib"):lib.rindex(")")]
+    li = [s for s in _top_level(lb) if not any(s.startswith(f'(symbol "{k}"') for k in syms)]
+    li += [v.replace('(symbol "CM4Carrier:', '(symbol "') for v in syms.values()]
+    SYMLIB.write_text("(kicad_symbol_lib\n  " + "\n  ".join(x.strip() for x in li) + "\n)\n")
+    print(f"schematic: {len(new)} Rev 9 items written to {SCH.name}; {len(syms)} symbols in {SYMLIB.name}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("generate")
     sub.add_parser("verify")
     sub.add_parser("render")
+    sub.add_parser("schematic")
     a = ap.parse_args()
     if a.cmd == "generate":
         generate_board()
         return 0
-    return {"verify": cmd_verify, "render": cmd_render}[a.cmd](a)
+    return {"verify": cmd_verify, "render": cmd_render, "schematic": cmd_schematic}[a.cmd](a)
 
 
 if __name__ == "__main__":

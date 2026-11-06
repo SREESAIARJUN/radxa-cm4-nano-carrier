@@ -20,6 +20,7 @@
   - CC1 & CC2 pins tied to GND via independent 5.1kΩ ±1% pulldown resistors (ensuring 5V power from USB-C PD power supplies).
 - Onboard Regulators:
   - 3.3V System Rail: High-efficiency synchronous step-down buck converter (e.g. Silergy SY8089AAAC, 2A continuous, 1.5MHz).
+    - **Rev 13 correction:** the SY8089AAAC switches at **1.0 MHz typ** (Silergy AN_SY8089/SY8089A Rev 0.9A, Electrical Characteristics, FOSC), not 1.5 MHz. All ripple/inductor math uses 1.0 MHz with a +/-20 % corner. Thermal limit (SOT23-5, thetaJA 170 C/W, TJ <= 125 C): 1.44 A continuous at TA 70 C, so the carrier 3V3 load budget is 1.2 A (see tools/buck_3v3.py calc).
   - 1.8V VDD_IO Rail: Low-dropout linear regulator or secondary buck for low-noise MIPI/ADC rails.
 - Power Sequencing: CM4 requires stable +5V rail; Global_EN and RUN pin control circuit.
 

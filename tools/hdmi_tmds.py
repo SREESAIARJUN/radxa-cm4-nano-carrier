@@ -14,20 +14,24 @@ saved .kicad_pcb, so the numbers in the report are what the fab gets.
 
 Sub-commands
 ------------
-  generate  Load the board, delete the previous Rev 11 group (idempotent),
-            write the J4 footprint, place J4, route the 4 pairs (centreline
-            -> chamfer -> miter offset -> pair trombones -> P/N phase
-            bumps), add the GND return/stitching vias and the L2/L3 GND
-            reference planes, fill zones, save. Also writes the HDMI_TMDS
-            net class into .kicad_pro and the DRC rules into .kicad_dru.
-  verify    Re-load the saved board with pcbnew and check lengths, skew,
-            coupling geometry, vias and pinout. Then run kicad-cli DRC
-            with mutation tests (a TMDS segment lengthened by 0.20 mm must
-            raise a skew violation, and so on). Writes
-            artifacts/rev11_hdmi_tmds_report.md. Exits 1 on failure.
+  generate  Strip everything a previous run added (S-expression level, see
+            strip_previous), write the J4 footprint, place J4, route the 4
+            pairs (centreline -> trombones -> 45-deg chamfers -> miter offset
+            -> P/N phase bumps, solved so all 8 nets are equal), add GND
+            return/stitching vias, keep the existing In1/In2 GND planes (or
+            pour full ones on a bare board), fill zones, save. Also writes the
+            HDMI_TMDS net class (.kicad_pro) and DRC rules (.kicad_dru).
+            Idempotent: re-running yields the same copper.
+  verify    Re-load the saved board with pcbnew and check, on the copper
+            itself: lengths/skew, 0.125 mm coupled gap, longest uncoupled
+            stretch, pair-to-pair spacing, GND reference under every segment,
+            vias, pinout, mechanics. Then kicad-cli DRC (0 TMDS/J4 violations)
+            and DRU mutation tests. Writes artifacts/rev11_hdmi_tmds_report.md;
+            exit 1 on any failure.
+  solve     Re-derive W/S for 100 ohm with the FD solver in mdi_impedance.py.
 
-Pipeline: tools/cm4_mechanical.py generate  ->  tools/hdmi_tmds.py generate
-(cm4_mechanical rebuilds the board from scratch; this stage is additive).
+Pipeline (each later stage is additive, earlier ones rebuild the board):
+  cm4_mechanical.py generate -> ethernet_mdi.py generate -> hdmi_tmds.py generate
 
 Geometry (carrier frame, mm, KiCad Y-down, viewed from the top)
 ---------------------------------------------------------------
@@ -35,14 +39,14 @@ J2 outer row (Y=38.50, F.Cu): CLK_N 17.2  CLK_P 17.6 | GND 18.0 | TX0_N 18.4
 TX0_P 18.8 | GND 19.2 | TX1_N 19.6 TX1_P 20.0 | GND 20.4 | TX2_N 20.8 TX2_P 21.2
 | GND 21.6.   Every pair has a GND pin on each side.
 
-J4 (B.Cu, flipped L/R) has staggered rows 0.2 mm apart. The rear row (odd
-pins: D2+ 3, D2- 5, D0+ 9, D0- 11) escapes backward on B.Cu. The front row
-(even pins: D1+ 6, D1- 8, CLK+ 12, CLK- 14) cannot pass between rear pads
-(0.20 mm gaps), so it drops through a via pair just in front of the pads and
-runs on F.Cu, entering the gap between J2's two pad rows from the right.
-Result: every TMDS net has exactly ONE through via, so via barrel length
-cancels in all comparisons, and F.Cu/B.Cu are identical microstrips (L1/L2
-and L4/L3 GND), so physical length == electrical length.
+J4 (B.Cu, at X 44 on the Y=40 edge) has staggered rows 0.2 mm apart. The
+rear row (D2+ 3, D2- 5, D0+ 9, D0- 11) escapes north on B.Cu. The front row
+(D1+ 6, D1- 8, CLK+ 12, CLK- 14) cannot pass between rear pads (0.20 mm
+gaps), so it drops through a via pair in front of the pads and runs on F.Cu,
+entering the gap between J2's two pad rows from the east. Every TMDS net has
+exactly ONE through via, so the via barrel cancels in all comparisons, and
+F.Cu/B.Cu are identical microstrips (L1/L2 and L4/L3 GND), so physical
+length == electrical length.
 """
 from __future__ import annotations
 
@@ -284,7 +288,7 @@ BUMP_EXTRA_PER_H = 2 * (math.sqrt(2) - 1)
 #   -> J2 (pads, or a via pair between / outboard of the DF40 rows).
 J4_ROT = 180.0                 # KiCad L/R flip = mirror + 180 deg; 180 here keeps the mouth at +Y
 J4_REAR_Y, J4_FRONT_Y = 33.615, 34.835
-J4_VIA_Y = 35.80               # front-row B->F via pairs, in front of the front pads (edge 35.335)
+J4_VIA_Y = 36.30               # front-row B->F via pairs, 0.97 mm in front of the front pads (room for GND stubs)
 TOP_N, TOP_S = 30.400, 31.255  # B.Cu top lanes (0.855 pitch); 1.17 mm clear of the T1 courtyard (Y 29.0)
 TOP_F_N, TOP_F_S = 29.000, 29.855  # F.Cu top lanes: higher, so the TX1 riser can carry its trombone
 COL_W, COL_E = 37.300, 38.155  # columns: 0.57 mm from the X=36.5 split edge, 1.77 mm to the J4 shell leg
@@ -294,7 +298,16 @@ J2_VIA_Y = 37.65               # TX0 F<->B vias between the DF40 rows (0.28 mm t
 J2_VIA_Y_OUT = 39.35           # TX2 vias OUTBOARD of the outer row (keeps TX2 polarity, 0.35 mm to edge)
 J2_GND_VIA_Y = 39.35
 J2_GND_PADS_X = (16.8, 18.0, 19.2)     # outer-row GND pins that get an outboard via
-STITCH_VIAS = [(44.00, 36.55)]         # between the J4 D1/CLK via pairs (L2<->L3 return path)
+STITCH_VIAS = []                       # (J4 return via is the pin-10 GND via, see J4_GND_TIES)
+# J4 SMD GND pins: 4 and 16 bond to the shell legs (THT, GND) along Y 35.6 in front of
+# pins 2/18; pin 10 runs between the D1/CLK via pairs to a GND via that is also the
+# L2<->L3 return path for both transitions. Rear-row shield pins 7/13 sit under the
+# F.Cu risers and between the B.Cu escapes: no via site (open item, README Rev 11).
+J4_GND_TIES = {"4": [(42.8, 35.6), (41.4, 35.6)], "16": [(45.2, 35.6), (46.6, 35.6)],
+               "10": [(44.0, 37.05)]}
+J4_GND_VIA = (44.0, 37.05)
+J4_GND_TIE_W = 0.10
+J2_TX2_GND = [(22.8, 38.5), (22.8, 39.2), (22.05, 39.35)]   # pin 162 -> GND via east of the TX2 via pair
 
 # pair -> (layer, J4 row, top lane Y, column X, strip lane Y, J2 end)
 ROUTE = {
@@ -312,7 +325,7 @@ W, NORTH = (-1, 0), (0, -1)
 TROMBONE_SLOTS = {
     "TX0": [((35.5, LANE_B_N), W, +1), ((31.5, LANE_B_N), W, +1), ((27.5, LANE_B_N), W, +1)],
     "TX2": [((33.5, LANE_B_S), W, -1), ((29.5, LANE_B_S), W, -1), ((25.5, LANE_B_S), W, -1)],
-    "TX1": [((43.3, 33.20), NORTH, +1)],
+    "TX1": [((43.1, 33.20), NORTH, +1)],
     "CLK": [],
 }
 TROMBONE_MAX_DEPTH = {"TX0": 2.60, "TX2": 2.60, "TX1": 3.60, "CLK": 0.0}
@@ -322,8 +335,8 @@ TROMBONE_MAX_DEPTH = {"TX0": 2.60, "TX2": 2.60, "TX1": 3.60, "CLK": 0.0}
 BUMP_ANCHORS = {
     # >= 1.2 mm pitch: every bump (<= 0.74 mm) is followed by >= 0.46 mm of coupled pair,
     # so no contiguous uncoupled stretch exceeds 1 mm (verify checks this on the copper).
-    "CLK": [(44.7, y) for y in (34.7, 33.5, 32.3, 31.1, 29.9)] + [(19.0, LANE_F_N)],
-    "TX1": [(43.3, 34.45)] + [(x, TOP_F_S) for x in (42.3, 41.2, 40.1, 39.0)],
+    "CLK": [(44.9, y) for y in (35.3, 34.2, 33.1, 32.0, 30.9, 29.85)] + [(19.0, LANE_F_N)],
+    "TX1": [(43.1, 34.7)] + [(x, TOP_F_S) for x in (42.25, 41.2, 40.15, 39.1)],
     "TX0": [(x, LANE_B_N) for x in (36.4, 33.0, 29.0, 24.6, 23.4, 22.2)],
     "TX2": [(x, TOP_S) for x in (41.9, 40.7, 39.5)] + [(x, LANE_B_S) for x in (35.0, 31.0, 23.0)],
 }
@@ -376,7 +389,7 @@ def via_centre_x(pair: str, pads: dict) -> float:
     xc = (p[0] + n[0]) / 2
     other = "CLK" if pair == "TX1" else "TX1"
     ox = sum(pads["J4"][PAIRS[other][k]][0] for k in (2, 3)) / 2
-    return xc + (0.10 if xc > ox else -0.10)
+    return xc + (0.30 if xc > ox else -0.30)
 
 
 def build_pair(pair: str, pads: dict, depths: list[float], bump_h: float | None, bump_net: str | None = None):
@@ -413,7 +426,8 @@ def build_pair(pair: str, pads: dict, depths: list[float], bump_h: float | None,
     for (pp, nn_, q) in ((Pm[0], Nm[0], Pm[1]), (Pm[-1], Nm[-1], Pm[-2])):
         assert math.dist(q, pp) < math.dist(q, nn_), f"{pair}: P/N would cross"
     sp, sn = stubs[pnet][1], stubs[nnet][1]
-    assert math.dist(sp[0], sp[-1]) < math.dist(sp[0], sn[-1]), f"{pair}: P/N stub would cross"
+    gap = min(seg_seg_dist(a, b, c, e) for a, b in zip(sp, sp[1:]) for c, e in zip(sn, sn[1:])) - TMDS_W
+    assert gap > 0.10, f"{pair}: P/N stubs cross or touch (gap {gap:.3f})"
     if bump_h:
         anchors = BUMP_ANCHORS[pair]
         if bump_net == pnet:
@@ -658,6 +672,11 @@ def cmd_generate(_a) -> int:
             track([(x, y), (x, J2_GND_VIA_Y)], "F.Cu", gnd, GND_STUB_W)
     for p in STITCH_VIAS:
         via(p, gnd)
+    via(J4_GND_VIA, gnd)
+    for pin, path in J4_GND_TIES.items():
+        track([pads["J4"][pin]] + path, "B.Cu", gnd, J4_GND_TIE_W)
+    via(J2_TX2_GND[-1], gnd)
+    track(J2_TX2_GND, "F.Cu", gnd, GND_STUB_W)
 
     # --- GND reference planes. If the Ethernet stage already poured In1/In2
     # (GND with the ETH_SHIELD notch) keep them; otherwise pour full planes.
@@ -684,7 +703,7 @@ def cmd_generate(_a) -> int:
     tb.SetRevision("11.0")
     tb.SetComment(2, "Rev 11: J4 Micro-HDMI D + HDMI0 TMDS 100R, 8 nets matched <= 0.15 mm (tools/hdmi_tmds.py)")
     board.Save(str(PCB))
-    write_project_rules()
+    write_project_rules(max(pair_len(r, p) for p, r in plan.items()))
 
     print(f"J4 {J4_FP} at {J4_AT} (B.Cu, rot {J4_ROT}).")
     for p, r in plan.items():
@@ -701,16 +720,31 @@ DRU_BEGIN = "# ---- BEGIN Rev 11 HDMI0 TMDS (generated by tools/hdmi_tmds.py) --
 DRU_END = "# ---- END Rev 11 HDMI0 TMDS ----"
 
 
-def dru_text() -> str:
+# KiCad 8 counts the via barrel in net length (F.Cu->B.Cu on this 1.6 mm stackup,
+# measured: 1.551 mm). Every TMDS net has exactly one via, so it only shifts the window.
+KICAD_VIA_LEN = 1.551
+
+
+def dru_text(target_len: float) -> str:
     cond = " || ".join(f"A.NetName == '{n}'" for n in TMDS_NETS)
+    L = target_len + KICAD_VIA_LEN
+    half = SKEW_MAX / 2
+    skew_rules = "\n".join(
+        f"""(rule "hdmi0_tmds_skew_{p}"
+  (condition "A.NetName == '{pn}' || A.NetName == '{nn}'")
+  (constraint skew (max {half:.3f}mm)))""" for p, (pn, nn, *_r) in PAIRS.items())
     return f"""{DRU_BEGIN}
 # 100 ohm differential (W {TMDS_W} / S {TMDS_S} mm, FD-solved, see tools/hdmi_tmds.py).
-# One length-matching group over ALL 8 TMDS nets: max - min <= {SKEW_MAX} mm. This
-# bounds intra-pair skew (P vs N) and inter-pair skew with a single rule, because
-# KiCad applies only one skew constraint per net.
-(rule "hdmi0_tmds_skew"
+# Intra-pair: KiCad 8 'skew' is measured against the AVERAGE of the nets the rule
+# matches. With exactly P and N in a group each deviates by |P-N|/2, so
+# max {half:.3f} mm  <=>  |P - N| <= {SKEW_MAX} mm.
+{skew_rules}
+
+# Inter-pair: a +/-{half:.3f} mm length window on all 8 nets (KiCad length incl. the
+# {KICAD_VIA_LEN} mm via barrel) bounds max-min <= {SKEW_MAX} mm across all four pairs.
+(rule "hdmi0_tmds_length_window"
   (condition "{cond}")
-  (constraint skew (max {SKEW_MAX}mm)))
+  (constraint length (min {L - half:.4f}mm) (max {L + half:.4f}mm)))
 
 (rule "hdmi0_tmds_width"
   (condition "A.NetClass == 'HDMI_TMDS'")
@@ -741,11 +775,11 @@ def dru_text() -> str:
 """
 
 
-def write_project_rules() -> None:
+def write_project_rules(target_len: float) -> None:
     txt = DRU.read_text()
-    if DRU_BEGIN in txt:
-        txt = txt[:txt.index(DRU_BEGIN)].rstrip() + "\n"
-    DRU.write_text(txt.rstrip() + "\n\n" + dru_text())
+    # remove ONLY our BEGIN..END block; other stages' rule blocks before/after it survive
+    txt = re.sub(re.escape(DRU_BEGIN) + r".*?" + re.escape(DRU_END) + r"\n?", "", txt, flags=re.S)
+    DRU.write_text(txt.rstrip() + "\n\n" + dru_text(target_len))
 
     pro = json.loads(PRO.read_text())
     ns = pro["net_settings"]
@@ -1019,6 +1053,18 @@ def cmd_verify(a) -> int:
          not bad_ref, f"{nsamp} samples, {len(bad_ref)} off-plane ({nskip} inside the {VIA_ZONE} mm via-transition "
          "zones excluded)" + (f", e.g. {bad_ref[:3]}" if bad_ref else ""))
 
+    # --- GND return via at every TMDS layer change (L2 <-> L3 reference swap)
+    gvias = [(tm(t.GetPosition().x), tm(t.GetPosition().y)) for t in board.GetTracks()
+             if t.Type() == pcbnew.PCB_VIA_T and t.GetNetname() == "GND"]
+    gshell = [(tm(pd.GetPosition().x), tm(pd.GetPosition().y)) for pd in j4.Pads() if pd.GetNumber() == "20"]
+    rd = {}
+    for t in board.GetTracks():
+        if t.Type() == pcbnew.PCB_VIA_T and t.GetNetname() in TMDS_NETS:
+            v = (tm(t.GetPosition().x), tm(t.GetPosition().y))
+            rd[t.GetNetname()] = min(math.dist(v, g) for g in gvias + gshell)
+    add_("GND return via (or grounded shell leg) within 2.0 mm of every TMDS layer-change via",
+         rd and max(rd.values()) <= 2.0, ", ".join(f"{n} {d:.2f}" for n, d in sorted(rd.items())))
+
     # --- timing summary
     mean = sum(L.values()) / 8
     add_("Insertion length (FR4, odd mode) within HDMI 2.0 carrier budget (< 60 mm)", mean < 60.0,
@@ -1038,6 +1084,25 @@ def cmd_verify(a) -> int:
         uc = [x for x in drc.get("unconnected_items", []) if hdmi_items(x) and any(
             n in json.dumps(x) for n in TMDS_NETS)]
         add_("kicad-cli: 0 unconnected TMDS items (J2 <-> J4 fully routed)", not uc, f"{len(uc)}")
+        # J4 ground pins: which GND pads of J4 still appear in an unconnected pair?
+        def j4_gnd_pads(x):
+            out = set()
+            for it in x.get("items", []):
+                m_ = re.match(r"(?:PTH )?[Pp]ad (\d+) \[GND\] of J4", it.get("description", ""))
+                if m_:
+                    out.add(m_.group(1))
+            return out
+        open_gnd = set()
+        for x in drc.get("unconnected_items", []):
+            open_gnd |= j4_gnd_pads(x)
+        must = {"4", "10", "16", "20"}
+        add_("J4 GND pins 4 (D2 shield), 10 (D0 shield), 16 (DDC/CEC GND) and the shell are connected to GND",
+             not (open_gnd & must), f"unconnected J4 GND pads: {sorted(open_gnd) or 'none'}")
+        info.append(("J4 rear-row shield pins 7 (D1) and 13 (CLK) - KNOWN OPEN (no via site under the F.Cu risers; Rev 12)",
+                     f"unconnected now: {sorted(open_gnd & {'7', '13'}) or 'none'}"))
+        nontmds = sorted({x["items"][0]["description"].split("[")[1].split("]")[0] for x in drc.get("unconnected_items", [])
+                          if "of J4" in json.dumps(x) and "[GND]" not in json.dumps(x)})
+        info.append(("J4 low-speed nets not yet routed (HPD/CEC/DDC/+5V: out of Rev 11 scope)", ", ".join(nontmds) or "none"))
         src = PCB.read_text()
         # pick a TMDS straight segment to lengthen
         net_codes = {board.FindNet(n).GetNetCode(): n for n in TMDS_NETS}
@@ -1061,11 +1126,11 @@ def cmd_verify(a) -> int:
             new = "\n".join(f'(segment (start {a_[0]:.6f} {a_[1]:.6f}) (end {b_[0]:.6f} {b_[1]:.6f}) {w} (uuid "00000000-0000-0000-0000-0000000b{i:04d}"))'
                             for i, (a_, b_) in enumerate(zip(pts, pts[1:])))
             muts["TMDS N trace +0.20 mm -> skew"] = ("skew_out_of_range", _replace_segment(src, m, new))
-        # GND via whose copper sits 0.15 mm from the TX1 F.Cu lane (rule needs 0.20 mm)
-        vy = LANE_F_N - TMDS_PITCH / 2 - TMDS_W / 2 - 0.25 - 0.15
-        muts["foreign via inside TMDS 0.20 mm halo -> clearance"] = (
-            "clearance", src.rstrip()[:-1] + f'  (via (at 40.0 {vy:.4f}) (size 0.5) (drill 0.3) (layers "F.Cu" "B.Cu") '
-            '(net 1) (uuid "00000000-0000-0000-0000-0000000c0001"))\n)\n')
+        # F.Cu-only GND track whose copper sits 0.15 mm from the CLK top lane (rule needs 0.20 mm)
+        gy = TOP_F_N - TMDS_PITCH / 2 - TMDS_W / 2 - 0.15 - 0.075
+        muts["GND track 0.15 mm from a TMDS trace -> clearance (hdmi0_tmds_to_other)"] = (
+            "clearance", src.rstrip()[:-1] + f'  (segment (start 39.5 {gy:.4f}) (end 41.5 {gy:.4f}) (width 0.15) '
+            '(layer "F.Cu") (net 1) (uuid "00000000-0000-0000-0000-0000000c0001"))\n)\n')
         base = {(x["type"], json.dumps(x["items"], sort_keys=True)) for x in drc.get("violations", []) if hdmi_items(x)}
         for name, (want, text) in muts.items():
             d = drc_in_scratch(text)

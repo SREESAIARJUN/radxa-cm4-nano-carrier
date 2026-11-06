@@ -428,7 +428,7 @@ def generate_dxf() -> None:
     # Peripheral connectors: the whole top side is under the module, so all
     # tall I/O moves to the bottom side (envelopes carried over from Rev 5).
     for (x1, y1, x2, y2, label) in [(7.5, 32.5, 16.5, 40.0, "USB-C (BOTTOM)"),
-                                    (34.5, 33.5, 41.5, 40.0, "uHDMI (BOTTOM)"),
+                                    (39.85, 32.95, 48.15, 40.0, "uHDMI J4 (BOTTOM, Rev 11)"),   # = J4 courtyard, tools/hdmi_tmds.py
                                     (40.0, 12.0, 55.0, 28.0, "ETH/IO (BOTTOM)")]:
         msp.add_lwpolyline([f(x1, y1), f(x2, y1), f(x2, y2), f(x1, y2)], close=True,
                            dxfattribs={"layer": "COMPONENTS_BOTTOM"})

@@ -1041,25 +1041,35 @@ def cmd_verify(a) -> int:
              not internal, f"{len(internal)} internal; {len([x for x in uc if buck_item(x) or '+5V_IN' in json.dumps(x)])} "
              "touching buck nets (J1 +5V_IN / +3V3_OUT / GND fan-out = next PDN stage)")
         src = PCB.read_text()
-        fbcode = board.FindNet("BUCK_FB").GetNetCode()
-        vincode = board.FindNet("+5V_IN").GetNetCode()
+        # net codes from the FILE text (pcbnew renumbers nets on load, so its codes can differ)
+        fbcode = int(re.search(r'\(net (\d+) "BUCK_FB"\)', src).group(1))
+        vincode = int(re.search(r'\(net (\d+) "\+5V_IN"\)', src).group(1))
         tail = src.rstrip()
         assert tail.endswith(")")
         lx_x = U_PIN["3"][0]
         seg_ = lambda a_, b_, w, code, k: (f'  (segment (start {xf(a_)[0]:.4f} {xf(a_)[1]:.4f}) (end {xf(b_)[0]:.4f} '
                                           f'{xf(b_)[1]:.4f}) (width {w}) (layer "B.Cu") (net {code}) '
                                           f'(uuid "00000000-0000-0000-0000-0000000d000{k}"))\n)\n')
+        # Mutant stubs START on copper of their own net: KiCad re-nets a floating track
+        # that lies inside another net's zone fill on load (it would silently become GND).
+        p5 = U_PIN["5"]
         muts = {
-            "FB stub routed 0.35 mm from LX copper (>= 0.2 default, < 1.0 rule) -> clearance": (
-                "clearance", 1, tail[:-1] + seg_((lx_x - 1.05, 13.5), (lx_x - 1.05, 14.1), 0.2, fbcode, 1)),
-            "+5V_IN neck-down to 0.3 mm -> track_width": (
-                "track_width", 2, tail[:-1] + seg_((46.0, 15.6), (47.5, 15.6), 0.3, vincode, 2)),
+            "FB stub from U5 pin 5 to 0.7 mm of LX copper -> rule buck_fb_lx_isolation": (
+                ("buck_fb_lx_isolation", "clearance", f"{FB_LX_MIN:.4f} mm"), 1, tail[:-1] + seg_(p5, (49.70, 12.40), 0.2, fbcode, 1)),
+            "+5V_IN 0.3 mm neck-down from the VIN entry via -> rule buck_power_width": (
+                ("buck_power_width", "track_width", f"{VIN_LX_W_MIN:.4f} mm"), 2,
+                tail[:-1] + seg_((46.00, 14.20), (46.00, 15.30), 0.3, vincode, 2)),
         }
-        for name, (want_t, k, text) in muts.items():
+        for name, (want_rule, k, text) in muts.items():
             d = drc_in_scratch(text)
             tag = f"0000000d000{k}"
-            got = sorted({x["type"] for x in d.get("violations", []) if tag in json.dumps(x)})
-            add_(f"MUTATION caught: {name}", want_t in got, f"DRC types on the injected item: {got}")
+            hits_ = [x for x in d.get("violations", []) if tag in json.dumps(x)]
+            # KiCad names custom clearance rules in the text, but reports custom track_width
+            # limits as "board setup constraints min width <rule value>": accept the rule's value.
+            rule_n, typ_, val_ = want_rule
+            ok = any(rule_n in x["description"] or (x["type"] == typ_ and val_ in x["description"]) for x in hits_)
+            add_(f"MUTATION caught: {name}", ok,
+                 "; ".join(sorted({f"{x['type']}: {x['description'][:70]}" for x in hits_})) or "no violation on injected item")
     return report(rows, a, drc, calc_res, dict(a_hf=a_hf, a_bulk=a_bulk, l_hf=l_hf, lx_area=lx_area, g41=g41, g40=g40))
 
 
