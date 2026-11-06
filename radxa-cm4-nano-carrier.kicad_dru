@@ -1,0 +1,19 @@
+(version 1)
+
+# Rev 7 mechanical rules: 55.0 x 40.0 mm CM4 envelope, zero overhang.
+# Every rule below is proven live by a mutation test in tools/verify_outline.py.
+
+# Any copper (tracks, vias, pads, pours) on any layer stays >= 0.30 mm from Edge.Cuts.
+(rule "board_edge_copper"
+  (constraint edge_clearance (min 0.3mm))
+)
+
+# NPTH drill wall to board edge >= 1x board thickness (1.6 mm): prevents web
+# cracking under screw torque / depanelisation.  KiCad 8 does not apply
+# edge_clearance to copper-less NPTH holes, so this must be a hole clearance
+# scoped to Edge.Cuts.  Measured to the Edge.Cuts stroke edge (0.025 mm inboard):
+# M2.5 @ 3.5 mm inset, 2.7 mm drill -> 2.125 mm.  Legacy 2.25 mm inset -> 0.875 mm (fails).
+(rule "npth_edge_web"
+  (condition "A.Pad_Type == 'NPTH, mechanical' && B.Layer == 'Edge.Cuts'")
+  (constraint physical_hole_clearance (min 1.6mm))
+)

@@ -5,17 +5,17 @@
       "Application": "Pcbnew",
       "Version": "8.0.9-8.0.9-0~ubuntu24.04.1"
     },
-    "CreationDate": "2026-11-06T05:47:39+00:00"
+    "CreationDate": "2026-11-06T05:57:42+00:00"
   },
   "GeneralSpecs": {
     "ProjectId": {
       "Name": "radxa-cm4-nano-carrier",
       "GUID": "72616478-612d-4636-9d34-2d6e616e6f2d",
-      "Revision": "rev?"
+      "Revision": "6.0"
     },
     "Size": {
-      "X": 55.15,
-      "Y": 40.15
+      "X": 55.1,
+      "Y": 40.1
     },
     "LayerNumber": 4,
     "BoardThickness": 1.6,
@@ -57,6 +57,26 @@
       "FilePolarity": "Positive"
     },
     {
+      "Path": "radxa-cm4-nano-carrier-F_Adhesive.gta",
+      "FileFunction": "Glue,Top",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-B_Adhesive.gba",
+      "FileFunction": "Glue,Bot",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-F_Paste.gtp",
+      "FileFunction": "SolderPaste,Top",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-B_Paste.gbp",
+      "FileFunction": "SolderPaste,Bot",
+      "FilePolarity": "Positive"
+    },
+    {
       "Path": "radxa-cm4-nano-carrier-F_Silkscreen.gto",
       "FileFunction": "Legend,Top",
       "FilePolarity": "Positive"
@@ -77,8 +97,83 @@
       "FilePolarity": "Negative"
     },
     {
+      "Path": "radxa-cm4-nano-carrier-User_Drawings.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_Comments.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_Eco1.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_Eco2.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
       "Path": "radxa-cm4-nano-carrier-Edge_Cuts.gm1",
       "FileFunction": "Profile",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-F_Fab.gbr",
+      "FileFunction": "AssemblyDrawing,Top",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-B_Fab.gbr",
+      "FileFunction": "AssemblyDrawing,Bot",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_1.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_2.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_3.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_4.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_5.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_6.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_7.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_8.gbr",
+      "FileFunction": "Other,User",
+      "FilePolarity": "Positive"
+    },
+    {
+      "Path": "radxa-cm4-nano-carrier-User_9.gbr",
+      "FileFunction": "Other,User",
       "FilePolarity": "Positive"
     }
   ],
@@ -86,6 +181,10 @@
     {
       "Type": "Legend",
       "Name": "Top Silk Screen"
+    },
+    {
+      "Type": "SolderPaste",
+      "Name": "Top Solder Paste"
     },
     {
       "Type": "SolderMask",
@@ -137,6 +236,10 @@
       "Type": "SolderMask",
       "Thickness": 0.01,
       "Name": "Bottom Solder Mask"
+    },
+    {
+      "Type": "SolderPaste",
+      "Name": "Bottom Solder Paste"
     },
     {
       "Type": "Legend",

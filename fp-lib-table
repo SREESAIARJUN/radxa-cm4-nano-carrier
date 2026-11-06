@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "radxa-cm4-nano-carrier")(type "KiCad")(uri "${KIPRJMOD}/lib/radxa-cm4-nano-carrier.pretty")(options "")(descr "Rev 6 CM4 mechanical footprints"))
+)
